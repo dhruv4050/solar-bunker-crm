@@ -38,9 +38,11 @@ function authenticateApiKey(req, res, next) {
   const rawIncomingKey = req.get('X-CRM-API-KEY') || req.get('x-crm-api-key') || req.query.api_key;
   const incomingKey = rawIncomingKey ? String(rawIncomingKey).trim().replace(/^["']|["']$/g, '') : null;
   const rawConfiguredKey = process.env.CRM_API_KEY;
-  const configuredKey = rawConfiguredKey && rawConfiguredKey.trim() !== '' && !rawConfiguredKey.includes('your_')
-    ? String(rawConfiguredKey).trim().replace(/^["']|["']$/g, '')
-    : DEFAULT_CRM_API_KEY;
+  
+  const validKeys = [
+    rawConfiguredKey ? String(rawConfiguredKey).trim().replace(/^["']|["']$/g, '') : null,
+    DEFAULT_CRM_API_KEY
+  ].filter(k => k && k !== '' && !k.includes('your_'));
 
   if (!incomingKey) {
     logWebhookEvent({
@@ -57,7 +59,7 @@ function authenticateApiKey(req, res, next) {
     });
   }
 
-  if (incomingKey !== configuredKey) {
+  if (!validKeys.includes(incomingKey)) {
     logWebhookEvent({
       status: 'unauthorized',
       action: 'rejected',

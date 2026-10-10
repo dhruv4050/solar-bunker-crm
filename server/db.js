@@ -5,35 +5,52 @@ dotenv.config();
 
 const cleanEnv = (val) => val ? String(val).trim().replace(/^["']|["']$/g, '') : null;
 
-const SUPABASE_URL = cleanEnv(process.env.SUPABASE_URL);
+const SUPABASE_URL = cleanEnv(process.env.SUPABASE_URL) || 'https://muqrumruisowcvllxaeo.supabase.co';
+
 const rawKeyCandidates = [
   cleanEnv(process.env.SUPABASE_SECRET_KEY),
   cleanEnv(process.env.SUPABASE_SERVICE_ROLE_KEY),
   cleanEnv(process.env.SUPABASE_KEY),
   cleanEnv(process.env.SUPABASE_ANON_KEY),
-  cleanEnv(process.env.SUPABASE_PUBLISHABLE_KEY)
+  cleanEnv(process.env.SUPABASE_PUBLISHABLE_KEY),
+  'sb_publishable_pgqRGZk56B1CARqRIf75UA_gAQGXK3w',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im11cXJ1bXJ1aXNvd2N2bGx4YWVvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0NTI0MDAsImV4cCI6MjEwNzAyODQwMH0.MgNLazO5Ht9yuJ_6SsnfFQVt7HKTY5B81ejGAF2QHZY'
 ].filter(k => k && k.length > 10 && !k.includes('your_') && !k.includes('placeholder'));
 
-const SUPABASE_KEY = rawKeyCandidates[0] || null;
+const clientPool = rawKeyCandidates.map(key => createClient(SUPABASE_URL, key, { auth: { persistSession: false } }));
+let activeClientIndex = 0;
 
-export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_KEY);
+export const isSupabaseConfigured = clientPool.length > 0;
 
-if (!isSupabaseConfigured) {
-  console.error('\n[FATAL CONFIG ERROR] Supabase configuration is missing or invalid!');
-  console.error('Please configure SUPABASE_URL and SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) in the environment variables.\n');
-}
-
-export const supabase = isSupabaseConfigured 
-  ? createClient(SUPABASE_URL, SUPABASE_KEY, {
-      auth: { persistSession: false }
-    })
-  : null;
-
-function assertSupabase() {
-  if (!supabase) {
-    throw new Error('Supabase database client is not initialized. Please ensure SUPABASE_URL and SUPABASE_SECRET_KEY are set.');
+export async function executeSupabase(operation) {
+  let lastError = null;
+  for (let i = 0; i < clientPool.length; i++) {
+    const candidateIdx = (activeClientIndex + i) % clientPool.length;
+    const client = clientPool[candidateIdx];
+    try {
+      const result = await operation(client);
+      if (result && result.error && (result.error.message?.includes('API key') || result.error.message?.includes('JWT') || result.error.code === 'PGRST301')) {
+        continue;
+      }
+      activeClientIndex = candidateIdx;
+      return result;
+    } catch (err) {
+      lastError = err;
+      if (err.message && (err.message.includes('API key') || err.message.includes('JWT') || err.message.includes('401'))) {
+        continue;
+      }
+      throw err;
+    }
   }
+  throw lastError || new Error('All Supabase key candidates failed');
 }
+
+export const supabase = new Proxy({}, {
+  get(target, prop) {
+    const client = clientPool[activeClientIndex] || clientPool[0];
+    return client[prop];
+  }
+});
 
 /**
  * Normalizes any variation of electricity bill into canonical Indian currency representation
@@ -144,46 +161,50 @@ export function formatLead(row) {
 // ─── DATABASE OPERATIONS (SUPABASE POSTGRESQL AUTHORITATIVE) ───
 
 export async function getLeads(filters = {}) {
-  assertSupabase();
-  let query = supabase.from('leads').select('*').order('created_at', { ascending: false });
+  const result = await executeSupabase(async (client) => {
+    let query = client.from('leads').select('*').order('created_at', { ascending: false });
 
-  if (filters.search) {
-    const s = filters.search.trim();
-    query = query.or(`name.ilike.%${s}%,phone.ilike.%${s}%,email.ilike.%${s}%,city.ilike.%${s}%,crm_lead_id.ilike.%${s}%`);
-  }
-  if (filters.call_status && filters.call_status !== 'ALL') {
-    query = query.eq('call_status', filters.call_status);
-  }
-  if (filters.qualification && filters.qualification !== 'ALL') {
-    query = query.eq('qualification', filters.qualification);
-  }
-  if (filters.meeting_booked !== undefined && filters.meeting_booked !== 'ALL') {
-    query = query.eq('meeting_booked', filters.meeting_booked === 'true' || filters.meeting_booked === '1');
-  }
-  if (filters.campaign && filters.campaign !== 'ALL') {
-    query = query.or(`campaign_name.eq.${filters.campaign},source_sheet.eq.${filters.campaign}`);
+    if (filters.search) {
+      const s = filters.search.trim();
+      query = query.or(`name.ilike.%${s}%,phone.ilike.%${s}%,email.ilike.%${s}%,city.ilike.%${s}%,crm_lead_id.ilike.%${s}%`);
+    }
+    if (filters.call_status && filters.call_status !== 'ALL') {
+      query = query.eq('call_status', filters.call_status);
+    }
+    if (filters.qualification && filters.qualification !== 'ALL') {
+      query = query.eq('qualification', filters.qualification);
+    }
+    if (filters.meeting_booked !== undefined && filters.meeting_booked !== 'ALL') {
+      query = query.eq('meeting_booked', filters.meeting_booked === 'true' || filters.meeting_booked === '1');
+    }
+    if (filters.campaign && filters.campaign !== 'ALL') {
+      query = query.or(`campaign_name.eq.${filters.campaign},source_sheet.eq.${filters.campaign}`);
+    }
+
+    return await query;
+  });
+
+  if (result.error) {
+    console.error('[Supabase] Error fetching leads:', result.error);
+    throw result.error;
   }
 
-  const { data: rows, error } = await query;
-  if (error) {
-    console.error('[Supabase] Error fetching leads:', error);
-    throw error;
-  }
-
-  const leads = (rows || []).map(formatLead);
+  const leads = (result.data || []).map(formatLead);
 
   // Fetch activities in batch for loaded leads
   const leadIds = leads.map(l => l.id);
   if (leadIds.length > 0) {
-    const { data: activities, error: actError } = await supabase
-      .from('activities')
-      .select('*')
-      .in('lead_id', leadIds)
-      .order('performed_at', { ascending: false });
+    const actRes = await executeSupabase(async (client) => {
+      return await client
+        .from('activities')
+        .select('*')
+        .in('lead_id', leadIds)
+        .order('performed_at', { ascending: false });
+    });
 
-    if (!actError && activities) {
+    if (!actRes.error && actRes.data) {
       const actMap = {};
-      for (const act of activities) {
+      for (const act of actRes.data) {
         if (!actMap[act.lead_id]) actMap[act.lead_id] = [];
         actMap[act.lead_id].push({
           id: act.id,
@@ -206,27 +227,30 @@ export async function getLeads(filters = {}) {
 }
 
 export async function getLeadById(id) {
-  assertSupabase();
-  const { data: row, error } = await supabase
-    .from('leads')
-    .select('*')
-    .or(`id.eq.${id},crm_lead_id.eq.${id}`)
-    .maybeSingle();
+  const result = await executeSupabase(async (client) => {
+    return await client
+      .from('leads')
+      .select('*')
+      .or(`id.eq.${id},crm_lead_id.eq.${id}`)
+      .maybeSingle();
+  });
 
-  if (error) {
-    console.error(`[Supabase] Error fetching lead ${id}:`, error);
-    throw error;
+  if (result.error) {
+    console.error(`[Supabase] Error fetching lead ${id}:`, result.error);
+    throw result.error;
   }
-  if (!row) return null;
+  if (!result.data) return null;
 
-  const lead = formatLead(row);
-  const { data: activities, error: actError } = await supabase
-    .from('activities')
-    .select('*')
-    .eq('lead_id', row.id)
-    .order('performed_at', { ascending: false });
+  const lead = formatLead(result.data);
+  const actRes = await executeSupabase(async (client) => {
+    return await client
+      .from('activities')
+      .select('*')
+      .eq('lead_id', result.data.id)
+      .order('performed_at', { ascending: false });
+  });
 
-  lead.activities = (!actError && activities ? activities : []).map(act => ({
+  lead.activities = (!actRes.error && actRes.data ? actRes.data : []).map(act => ({
     id: act.id,
     activity_type: act.activity_type,
     outcome: act.outcome,
@@ -236,7 +260,7 @@ export async function getLeadById(id) {
     next_follow_up_at: act.next_follow_up_at
   }));
 
-  lead.history = (!actError && activities ? activities : []).map(act => ({
+  lead.history = (!actRes.error && actRes.data ? actRes.data : []).map(act => ({
     id: act.id,
     timestamp: act.performed_at,
     author: act.performed_by,
@@ -249,22 +273,25 @@ export async function getLeadById(id) {
 }
 
 export async function findExistingLead(crmLeadId, phone) {
-  assertSupabase();
   if (crmLeadId) {
-    const { data, error } = await supabase
-      .from('leads')
-      .select('*')
-      .eq('source', 'google_sheet')
-      .eq('crm_lead_id', crmLeadId)
-      .maybeSingle();
-    if (!error && data) return data;
+    const res = await executeSupabase(async (client) => {
+      return await client
+        .from('leads')
+        .select('*')
+        .eq('source', 'google_sheet')
+        .eq('crm_lead_id', crmLeadId)
+        .maybeSingle();
+    });
+    if (!res.error && res.data) return res.data;
   }
   if (phone) {
     const cleanPhone = phone.replace(/\D/g, '');
     if (cleanPhone.length >= 7) {
-      const { data: allLeads, error } = await supabase.from('leads').select('*');
-      if (!error && allLeads) {
-        return allLeads.find(l => l.phone && l.phone.replace(/\D/g, '') === cleanPhone) || null;
+      const res = await executeSupabase(async (client) => {
+        return await client.from('leads').select('*');
+      });
+      if (!res.error && res.data) {
+        return res.data.find(l => l.phone && l.phone.replace(/\D/g, '') === cleanPhone) || null;
       }
     }
   }
@@ -272,29 +299,30 @@ export async function findExistingLead(crmLeadId, phone) {
 }
 
 export async function upsertLead(leadRecord) {
-  assertSupabase();
-  const { data, error } = await supabase.from('leads').upsert(leadRecord).select().maybeSingle();
-  if (error) {
-    console.error('[Supabase] Error upserting lead:', error);
-    throw error;
+  const result = await executeSupabase(async (client) => {
+    return await client.from('leads').upsert(leadRecord).select().maybeSingle();
+  });
+  if (result.error) {
+    console.error('[Supabase] Error upserting lead:', result.error);
+    throw result.error;
   }
-  return data || leadRecord;
+  return result.data || leadRecord;
 }
 
 export async function updateLeadDetails(leadId, updates) {
-  assertSupabase();
   const now = new Date().toISOString();
   const payload = { ...updates, updated_at: now };
-  const { data, error } = await supabase.from('leads').update(payload).eq('id', leadId).select().single();
-  if (error) {
-    console.error(`[Supabase] Error updating lead ${leadId}:`, error);
-    throw error;
+  const result = await executeSupabase(async (client) => {
+    return await client.from('leads').update(payload).eq('id', leadId).select().single();
+  });
+  if (result.error) {
+    console.error(`[Supabase] Error updating lead ${leadId}:`, result.error);
+    throw result.error;
   }
-  return formatLead(data);
+  return formatLead(result.data);
 }
 
 export async function addActivity(act) {
-  assertSupabase();
   const activityId = act.id || `act_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const now = act.performed_at || new Date().toISOString();
 
@@ -310,20 +338,23 @@ export async function addActivity(act) {
     metadata: act.metadata ? (typeof act.metadata === 'object' ? act.metadata : JSON.parse(act.metadata)) : null
   };
 
-  const { data, error } = await supabase.from('activities').insert(activityRecord).select().single();
-  if (error) {
-    console.error('[Supabase] Error adding activity:', error);
+  const result = await executeSupabase(async (client) => {
+    return await client.from('activities').insert(activityRecord).select().single();
+  });
+  if (result.error) {
+    console.error('[Supabase] Error adding activity:', result.error);
   }
-  return data || activityRecord;
+  return result.data || activityRecord;
 }
 
 export async function getOrCreateCampaign(sheetName, spreadsheetId, spreadsheetName) {
   if (!sheetName && !spreadsheetName) return null;
-  assertSupabase();
   const campaignName = sheetName || spreadsheetName || 'General Campaign';
 
-  const { data: existing } = await supabase.from('campaigns').select('*').eq('name', campaignName).maybeSingle();
-  if (existing) return existing;
+  const existingRes = await executeSupabase(async (client) => {
+    return await client.from('campaigns').select('*').eq('name', campaignName).maybeSingle();
+  });
+  if (existingRes.data) return existingRes.data;
 
   const newId = `camp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const now = new Date().toISOString();
@@ -338,34 +369,35 @@ export async function getOrCreateCampaign(sheetName, spreadsheetId, spreadsheetN
     updated_at: now
   };
 
-  const { data: created, error } = await supabase.from('campaigns').insert(newCamp).select().single();
-  if (error) {
-    console.error('[Supabase] Error creating campaign:', error);
-  }
-  return created || newCamp;
+  const createdRes = await executeSupabase(async (client) => {
+    return await client.from('campaigns').insert(newCamp).select().single();
+  });
+  return createdRes.data || newCamp;
 }
 
 export async function getCampaigns() {
-  assertSupabase();
-  const { data: camps, error } = await supabase.from('campaigns').select('*').order('updated_at', { ascending: false });
-  if (error) throw error;
+  const campsRes = await executeSupabase(async (client) => {
+    return await client.from('campaigns').select('*').order('updated_at', { ascending: false });
+  });
+  if (campsRes.error) throw campsRes.error;
   
-  // Count leads for each campaign
-  const { data: allLeads } = await supabase.from('leads').select('campaign_id, campaign_name, source_sheet');
+  const leadsRes = await executeSupabase(async (client) => {
+    return await client.from('leads').select('campaign_id, campaign_name, source_sheet');
+  });
+  
   const countMap = {};
-  for (const l of (allLeads || [])) {
+  for (const l of (leadsRes.data || [])) {
     const cId = l.campaign_id;
     if (cId) countMap[cId] = (countMap[cId] || 0) + 1;
   }
 
-  return (camps || []).map(c => ({
+  return (campsRes.data || []).map(c => ({
     ...c,
     lead_count: countMap[c.id] || 0
   }));
 }
 
 export async function logWebhookEvent({ crm_lead_id, source_sheet, status, action, payload, response_message, ip }) {
-  if (!supabase) return;
   const id = `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const now = new Date().toISOString();
   const logRecord = {
@@ -380,53 +412,47 @@ export async function logWebhookEvent({ crm_lead_id, source_sheet, status, actio
     response_message: response_message || ''
   };
 
-  const { error } = await supabase.from('webhook_logs').insert(logRecord);
-  if (error) {
-    console.error('[Supabase] Webhook log insert error:', error);
+  try {
+    await executeSupabase(async (client) => {
+      return await client.from('webhook_logs').insert(logRecord);
+    });
+  } catch (err) {
+    console.error('[Supabase] Webhook log insert error:', err);
   }
 }
 
 export async function getWebhookLogs() {
-  assertSupabase();
-  const { data: logs, error } = await supabase.from('webhook_logs').select('*').order('received_at', { ascending: false }).limit(50);
-  if (error) throw error;
-  return logs || [];
+  const res = await executeSupabase(async (client) => {
+    return await client.from('webhook_logs').select('*').order('received_at', { ascending: false }).limit(50);
+  });
+  if (res.error) throw res.error;
+  return res.data || [];
 }
 
 export async function getDatabaseHealth() {
-  if (!supabase) {
-    return {
-      connected: false,
-      provider: 'Supabase PostgreSQL (Cloud)',
-      error: 'Supabase credentials not configured in environment variables',
-      database: {
-        leadCount: 0,
-        activityCount: 0,
-        webhookLogCount: 0,
-        campaignCount: 0
-      }
-    };
-  }
-
   try {
-    const { count: leadCount, error: e1 } = await supabase.from('leads').select('*', { count: 'exact', head: true });
-    if (e1) throw e1;
-    const { count: activityCount, error: e2 } = await supabase.from('activities').select('*', { count: 'exact', head: true });
-    if (e2) throw e2;
-    const { count: webhookLogCount, error: e3 } = await supabase.from('webhook_logs').select('*', { count: 'exact', head: true });
-    if (e3) throw e3;
-    const { count: campaignCount, error: e4 } = await supabase.from('campaigns').select('*', { count: 'exact', head: true });
-    if (e4) throw e4;
+    const counts = await executeSupabase(async (client) => {
+      const { count: leadCount, error: e1 } = await client.from('leads').select('*', { count: 'exact', head: true });
+      if (e1) throw e1;
+      const { count: activityCount, error: e2 } = await client.from('activities').select('*', { count: 'exact', head: true });
+      if (e2) throw e2;
+      const { count: webhookLogCount, error: e3 } = await client.from('webhook_logs').select('*', { count: 'exact', head: true });
+      if (e3) throw e3;
+      const { count: campaignCount, error: e4 } = await client.from('campaigns').select('*', { count: 'exact', head: true });
+      if (e4) throw e4;
 
-    return {
-      connected: true,
-      provider: 'Supabase PostgreSQL (Cloud)',
-      database: {
+      return {
         leadCount: leadCount || 0,
         activityCount: activityCount || 0,
         webhookLogCount: webhookLogCount || 0,
         campaignCount: campaignCount || 0
-      }
+      };
+    });
+
+    return {
+      connected: true,
+      provider: 'Supabase PostgreSQL (Cloud)',
+      database: counts
     };
   } catch (err) {
     console.error('[Supabase] Health check error:', err.message);
@@ -445,16 +471,18 @@ export async function getDatabaseHealth() {
 }
 
 export async function deleteLeadById(id) {
-  assertSupabase();
-  await supabase.from('activities').delete().eq('lead_id', id);
-  await supabase.from('leads').delete().eq('id', id);
+  await executeSupabase(async (client) => {
+    await client.from('activities').delete().eq('lead_id', id);
+    return await client.from('leads').delete().eq('id', id);
+  });
   return true;
 }
 
 export async function clearAllDatabase() {
-  assertSupabase();
-  await supabase.from('activities').delete().neq('id', '0');
-  await supabase.from('leads').delete().neq('id', '0');
+  await executeSupabase(async (client) => {
+    await client.from('activities').delete().neq('id', '0');
+    return await client.from('leads').delete().neq('id', '0');
+  });
   return true;
 }
 

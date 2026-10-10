@@ -10,5 +10,9 @@ services:
         value: 10000
       - key: CRM_API_KEY
         sync: false
-      - key: DB_PATH
-        value: ./data/solar_bunker_crm.db
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: PUBLIC_URL
+        sync: false

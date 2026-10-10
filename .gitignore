@@ -28,9 +28,9 @@ dist-ssr
 .env.*
 !.env.example
 
-# Local SQLite Database
+# Local SQLite Database & Backups
 data/
+backups/
 *.db
 *.db-wal
 *.db-shm
-

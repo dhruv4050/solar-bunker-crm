@@ -1,9 +1,18 @@
 import express from 'express';
-import { db, getOrCreateCampaign } from '../db.js';
+import { 
+  findExistingLead, 
+  upsertLead, 
+  addActivity, 
+  getOrCreateCampaign, 
+  logWebhookEvent, 
+  getWebhookLogs,
+  getDatabaseHealth,
+  isSupabaseConfigured,
+  normalizeElectricityBill 
+} from '../db.js';
 
 const router = express.Router();
 
-// Helper to extract fields case-insensitively with alias support
 function extractField(obj, aliases, defaultVal = null) {
   if (!obj || typeof obj !== 'object') return defaultVal;
   
@@ -60,52 +69,51 @@ function authenticateApiKey(req, res, next) {
   next();
 }
 
-// Log webhook request for admin dashboard inspection
-function logWebhookEvent({ crm_lead_id, source_sheet, status, action, payload, response_message, ip }) {
-  try {
-    const id = `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const now = new Date().toISOString();
-    db.prepare(`
-      INSERT INTO webhook_logs (id, received_at, ip, crm_lead_id, source_sheet, status, action, payload, response_message)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      now,
-      ip || '',
-      crm_lead_id || '',
-      source_sheet || '',
-      status || 'unknown',
-      action || '',
-      JSON.stringify(payload || {}),
-      response_message || ''
-    );
-  } catch (err) {
-    console.error('[Webhook] Failed to write webhook log:', err);
-  }
-}
-
 /**
  * GET /api/webhooks/leads/health
- * Public health check endpoint for verifying webhook availability
+ * Safe public health check endpoint for verifying webhook availability & database connectivity
  */
-router.get('/leads/health', (req, res) => {
-  res.json({
-    success: true,
-    service: "CRM lead webhook",
-    status: "online"
-  });
+router.get('/leads/health', async (req, res) => {
+  try {
+    const dbHealth = await getDatabaseHealth();
+    const isHealthy = dbHealth.connected;
+
+    res.status(isHealthy ? 200 : 503).json({
+      success: isHealthy,
+      service: 'Solar Bunker CRM Webhook API',
+      status: isHealthy ? 'healthy' : 'unhealthy',
+      database: {
+        provider: dbHealth.provider,
+        connected: dbHealth.connected,
+        records: dbHealth.database
+      },
+      config: {
+        supabaseConfigured: isSupabaseConfigured,
+        apiKeyConfigured: Boolean(process.env.CRM_API_KEY)
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      service: 'Solar Bunker CRM Webhook API',
+      status: 'error',
+      error: err.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 /**
  * POST /api/webhooks/leads
  * Main webhook endpoint for Google Apps Script lead ingestion (UPSERT)
  */
-router.post('/leads', authenticateApiKey, (req, res) => {
+router.post('/leads', authenticateApiKey, async (req, res) => {
   try {
     const payload = req.body;
 
     if (!payload || typeof payload !== 'object' || Object.keys(payload).length === 0) {
-      logWebhookEvent({
+      await logWebhookEvent({
         status: 'error',
         action: 'rejected',
         response_message: 'Empty or invalid JSON body',
@@ -125,9 +133,9 @@ router.post('/leads', authenticateApiKey, (req, res) => {
     const phone = extractField(payload, ['phone', 'phone_number', 'phonenumber', 'mobile', 'contact'], '');
     const email = extractField(payload, ['email', 'email_address', 'mail'], '');
     const city = extractField(payload, ['city', 'location', 'address', 'state', 'zip', 'zip_code'], 'N/A');
-    const monthlyBill = extractField(payload, ['monthly_bill', 'monthly_electric_bill', 'electricity_bill', 'electric_bill', 'bill', 'average_monthly_electric_bill'], 'N/A');
+    const rawMonthlyBill = extractField(payload, ['monthly_bill', 'monthly_electric_bill', 'electricity_bill', 'electric_bill', 'bill', 'current_electricity_bill'], 'N/A');
     const budget = extractField(payload, ['budget', 'estimated_budget', 'budget_range'], 'N/A');
-    const homeowner = extractField(payload, ['homeowner', 'home_owner', 'is_homeowner', 'property_owner', 'property_type', 'home_type'], 'Yes');
+    const homeowner = extractField(payload, ['homeowner', 'home_owner', 'is_homeowner', 'property_owner', 'property_type', 'what\'s_your_property_type', 'home_type'], 'Yes');
     const roofType = extractField(payload, ['roof_type', 'roof', 'roof_shade', 'roof_condition'], 'Standard');
     
     // Source Metadata
@@ -138,7 +146,7 @@ router.post('/leads', authenticateApiKey, (req, res) => {
     const syncedFrom = extractField(payload, ['_synced_from', 'synced_from', 'source_platform'], 'Google Apps Script');
 
     if (!crmLeadId && !phone && !name) {
-      logWebhookEvent({
+      await logWebhookEvent({
         status: 'error',
         action: 'rejected',
         response_message: 'Missing lead identifier, phone, or name',
@@ -156,8 +164,8 @@ router.post('/leads', authenticateApiKey, (req, res) => {
     const standardKeys = [
       '_crm_lead_id', 'crm_lead_id', 'lead_id', 'id', 'name', 'full_name', 'fullname',
       'phone', 'phone_number', 'mobile', 'email', 'email_address', 'city', 'address',
-      'monthly_bill', 'monthly_electric_bill', 'electricity_bill', 'bill', 'budget',
-      'homeowner', 'home_owner', 'property_type', 'roof_type', 'roof',
+      'monthly_bill', 'monthly_electric_bill', 'electricity_bill', 'bill', 'current_electricity_bill',
+      'budget', 'homeowner', 'home_owner', 'property_type', 'roof_type', 'roof',
       '_source_sheet', 'source_sheet', '_source_spreadsheet_id', 'source_spreadsheet_id',
       '_source_spreadsheet_name', 'source_spreadsheet_name', '_source_row_number',
       'source_row_number', '_synced_from', 'synced_from'
@@ -171,29 +179,18 @@ router.post('/leads', authenticateApiKey, (req, res) => {
       }
     }
 
+    // Canonical normalization of electricity bill
+    const canonicalMonthlyBill = normalizeElectricityBill(rawMonthlyBill, { ...rawExtraFields, ...payload });
+
     // Dynamic Campaign Association
-    const campaign = getOrCreateCampaign(sourceSheet, sourceSpreadsheetId, sourceSpreadsheetName);
+    const campaign = await getOrCreateCampaign(sourceSheet, sourceSpreadsheetId, sourceSpreadsheetName);
     const campaignId = campaign ? campaign.id : null;
     const campaignName = campaign ? campaign.name : sourceSheet;
 
     const now = new Date().toISOString();
 
-    // Check if lead exists (UPSERT by source + external ID or fallback to phone if no crm_lead_id)
-    let existingLead = null;
-    if (crmLeadId) {
-      existingLead = db.prepare(`
-        SELECT * FROM leads WHERE source = 'google_sheet' AND crm_lead_id = ?
-      `).get(crmLeadId);
-    }
-
-    // Fallback search by phone if external ID was not yet recorded
-    if (!existingLead && phone) {
-      const cleanIncomingPhone = phone.replace(/\D/g, '');
-      if (cleanIncomingPhone.length >= 7) {
-        const potentialMatches = db.prepare(`SELECT * FROM leads WHERE phone IS NOT NULL`).all();
-        existingLead = potentialMatches.find(l => l.phone && l.phone.replace(/\D/g, '') === cleanIncomingPhone) || null;
-      }
-    }
+    // Check if lead exists (UPSERT by source + external ID or fallback to phone)
+    const existingLead = await findExistingLead(crmLeadId, phone);
 
     let internalLeadId;
     let actionResult;
@@ -201,141 +198,116 @@ router.post('/leads', authenticateApiKey, (req, res) => {
     let responseMsg;
 
     if (existingLead) {
-      // ─── UPDATE EXISTING LEAD ──────────────────────────────────
+      // ─── UPDATE EXISTING LEAD (Preserve activities & CRM status) ───────────────
       internalLeadId = existingLead.id;
       actionResult = 'updated';
       httpStatus = 200;
       responseMsg = 'Lead updated successfully';
 
-      // Merge extra fields with existing raw_data
+      // Merge extra fields
       let mergedRawData = {};
-      try {
-        mergedRawData = existingLead.raw_data ? JSON.parse(existingLead.raw_data) : {};
-      } catch (e) {}
+      if (existingLead.raw_data) {
+        mergedRawData = typeof existingLead.raw_data === 'string' ? JSON.parse(existingLead.raw_data) : existingLead.raw_data;
+      }
       mergedRawData = { ...mergedRawData, ...rawExtraFields };
 
-      // Update lead record while keeping internal CRM fields (call_status, qualification, meetings, notes) intact!
-      db.prepare(`
-        UPDATE leads SET
-          crm_lead_id = COALESCE(?, crm_lead_id),
-          name = COALESCE(?, name),
-          phone = COALESCE(?, phone),
-          email = CASE WHEN ? != '' THEN ? ELSE email END,
-          city = CASE WHEN ? != 'N/A' THEN ? ELSE city END,
-          monthly_bill = CASE WHEN ? != 'N/A' THEN ? ELSE monthly_bill END,
-          budget = CASE WHEN ? != 'N/A' THEN ? ELSE budget END,
-          homeowner = COALESCE(?, homeowner),
-          roof_type = CASE WHEN ? != 'Standard' THEN ? ELSE roof_type END,
-          campaign_id = COALESCE(?, campaign_id),
-          campaign_name = COALESCE(?, campaign_name),
-          source_sheet = COALESCE(?, source_sheet),
-          source_spreadsheet_id = COALESCE(?, source_spreadsheet_id),
-          source_spreadsheet_name = COALESCE(?, source_spreadsheet_name),
-          source_row_number = COALESCE(?, source_row_number),
-          synced_from = COALESCE(?, synced_from),
-          raw_data = ?,
-          updated_at = ?
-        WHERE id = ?
-      `).run(
-        crmLeadId || null,
-        name,
-        phone,
-        email, email,
-        city, city,
-        monthlyBill, monthlyBill,
-        budget, budget,
-        homeowner,
-        roofType, roofType,
-        campaignId,
-        campaignName,
-        sourceSheet,
-        sourceSpreadsheetId,
-        sourceSpreadsheetName,
-        sourceRowNumber,
-        syncedFrom,
-        JSON.stringify(mergedRawData),
-        now,
-        internalLeadId
-      );
+      await upsertLead({
+        id: internalLeadId,
+        crm_lead_id: crmLeadId || existingLead.crm_lead_id || null,
+        source: 'google_sheet',
+        name: name || existingLead.name,
+        phone: phone || existingLead.phone,
+        email: email || existingLead.email,
+        city: city !== 'N/A' ? city : existingLead.city,
+        monthly_bill: canonicalMonthlyBill !== 'N/A' ? canonicalMonthlyBill : existingLead.monthly_bill,
+        estimated_monthly_bill: canonicalMonthlyBill !== 'N/A' ? canonicalMonthlyBill : existingLead.estimated_monthly_bill,
+        budget: budget !== 'N/A' ? budget : existingLead.budget,
+        homeowner: homeowner || existingLead.homeowner,
+        property_type: existingLead.property_type || 'Home',
+        roof_type: roofType !== 'Standard' ? roofType : existingLead.roof_type,
+        campaign_id: campaignId || existingLead.campaign_id,
+        campaign_name: campaignName || existingLead.campaign_name,
+        source_sheet: sourceSheet || existingLead.source_sheet,
+        source_spreadsheet_id: sourceSpreadsheetId || existingLead.source_spreadsheet_id,
+        source_spreadsheet_name: sourceSpreadsheetName || existingLead.source_spreadsheet_name,
+        source_row_number: sourceRowNumber || existingLead.source_row_number,
+        synced_from: syncedFrom || existingLead.synced_from,
+        raw_data: mergedRawData,
+        qualification: existingLead.qualification || 'Pending',
+        call_status: existingLead.call_status || 'Not Called',
+        pickup_status: existingLead.pickup_status || 'Pending',
+        interest_level: existingLead.interest_level || 'Pending',
+        meeting_booked: existingLead.meeting_booked,
+        meeting_date: existingLead.meeting_date,
+        meeting_time_slot: existingLead.meeting_time_slot,
+        meeting_notes: existingLead.meeting_notes,
+        notes: existingLead.notes,
+        updated_at: now
+      });
 
-      // Add activity entry (preserving system of record)
-      const activityId = `act_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      db.prepare(`
-        INSERT INTO activities (id, lead_id, activity_type, outcome, notes, performed_by, performed_at, metadata)
-        VALUES (?, ?, 'webhook_sync', 'Lead Updated via Google Apps Script', ?, ?, ?, ?)
-      `).run(
-        activityId,
-        internalLeadId,
-        `Synchronized from sheet tab "${sourceSheet}" (Row ${sourceRowNumber || 'N/A'}). Source ID: ${crmLeadId || 'N/A'}`,
-        syncedFrom,
-        now,
-        JSON.stringify({ crm_lead_id: crmLeadId, source_sheet: sourceSheet, source_row_number: sourceRowNumber })
-      );
+      // Add sync activity entry to preserve full history
+      await addActivity({
+        lead_id: internalLeadId,
+        activity_type: 'webhook_sync',
+        outcome: 'Lead Updated via Google Apps Script',
+        notes: `Synchronized from sheet tab "${sourceSheet}" (Row ${sourceRowNumber || 'N/A'}). Source ID: ${crmLeadId || 'N/A'}`,
+        performed_by: syncedFrom,
+        performed_at: now,
+        metadata: { crm_lead_id: crmLeadId, source_sheet: sourceSheet, source_row_number: sourceRowNumber }
+      });
 
     } else {
-      // ─── CREATE NEW LEAD ───────────────────────────────────────
+      // ─── CREATE NEW LEAD ───────────────────────────────────────────────────────
       internalLeadId = `lead_sb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       actionResult = 'created';
       httpStatus = 201;
       responseMsg = 'Lead created successfully';
 
-      db.prepare(`
-        INSERT INTO leads (
-          id, crm_lead_id, source, name, phone, email, city,
-          monthly_bill, budget, homeowner, property_type, roof_type,
-          qualification, call_status, pickup_status, interest_level,
-          campaign_id, campaign_name, source_sheet, source_spreadsheet_id,
-          source_spreadsheet_name, source_row_number, synced_from,
-          raw_data, notes, created_at, updated_at
-        ) VALUES (
-          ?, ?, 'google_sheet', ?, ?, ?, ?,
-          ?, ?, ?, ?, ?,
-          'Pending', 'Not Called', 'Pending', 'Pending',
-          ?, ?, ?, ?,
-          ?, ?, ?,
-          ?, '', ?, ?
-        )
-      `).run(
-        internalLeadId,
-        crmLeadId || null,
+      await upsertLead({
+        id: internalLeadId,
+        crm_lead_id: crmLeadId || null,
+        source: 'google_sheet',
         name,
         phone,
-        email,
-        city,
-        monthlyBill,
-        budget,
+        email: email || '',
+        city: city || 'N/A',
+        monthly_bill: canonicalMonthlyBill,
+        estimated_monthly_bill: canonicalMonthlyBill,
+        budget: budget || 'N/A',
         homeowner,
-        homeowner, // property_type fallback
-        roofType,
-        campaignId,
-        campaignName,
-        sourceSheet,
-        sourceSpreadsheetId,
-        sourceSpreadsheetName,
-        sourceRowNumber,
-        syncedFrom,
-        JSON.stringify(rawExtraFields),
-        now,
-        now
-      );
+        property_type: homeowner || 'Home',
+        roof_type: roofType,
+        qualification: 'Pending',
+        call_status: 'Not Called',
+        pickup_status: 'Pending',
+        interest_level: 'Pending',
+        campaign_id: campaignId,
+        campaign_name: campaignName,
+        source_sheet: sourceSheet,
+        source_spreadsheet_id: sourceSpreadsheetId,
+        source_spreadsheet_name: sourceSpreadsheetName,
+        source_row_number: sourceRowNumber ? Number(sourceRowNumber) : null,
+        synced_from: syncedFrom,
+        raw_data: rawExtraFields,
+        notes: '',
+        created_at: now,
+        updated_at: now
+      });
 
-      // Add initial activity entry
-      const activityId = `act_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      db.prepare(`
-        INSERT INTO activities (id, lead_id, activity_type, outcome, notes, performed_by, performed_at, metadata)
-        VALUES (?, ?, 'lead_created', 'Lead Ingested via Google Apps Script', ?, ?, ?, ?)
-      `).run(
-        activityId,
-        internalLeadId,
-        `New lead created via webhook from sheet tab "${sourceSheet}" (Row ${sourceRowNumber || 'N/A'}). Source ID: ${crmLeadId || 'N/A'}`,
-        syncedFrom,
-        now,
-        JSON.stringify({ crm_lead_id: crmLeadId, source_sheet: sourceSheet, source_row_number: sourceRowNumber })
-      );
+      // Initial activity record
+      await addActivity({
+        lead_id: internalLeadId,
+        activity_type: 'lead_created',
+        outcome: 'Lead Ingested via Google Apps Script',
+        notes: `New lead created via webhook from sheet tab "${sourceSheet}" (Row ${sourceRowNumber || 'N/A'}). Source ID: ${crmLeadId || 'N/A'}`,
+        performed_by: syncedFrom,
+        performed_at: now,
+        metadata: { crm_lead_id: crmLeadId, source_sheet: sourceSheet, source_row_number: sourceRowNumber }
+      });
     }
 
-    // Log success
-    logWebhookEvent({
+    // Log success in Supabase webhook_logs
+    await logWebhookEvent({
       crm_lead_id: crmLeadId,
       source_sheet: sourceSheet,
       status: 'success',
@@ -353,8 +325,8 @@ router.post('/leads', authenticateApiKey, (req, res) => {
     });
 
   } catch (err) {
-    console.error('[Webhook] Internal error processing lead webhook:', err);
-    logWebhookEvent({
+    console.error('[Webhook] Error processing lead webhook:', err);
+    await logWebhookEvent({
       status: 'error',
       action: 'rejected',
       response_message: err.message,
@@ -369,34 +341,18 @@ router.post('/leads', authenticateApiKey, (req, res) => {
   }
 });
 
-// GET /api/webhooks/logs - Get recent webhook logs for admin verification
-router.get('/logs', (req, res) => {
+// GET /api/webhooks/logs - Get recent webhook logs
+router.get('/logs', async (req, res) => {
   try {
-    const logs = db.prepare(`
-      SELECT * FROM webhook_logs ORDER BY received_at DESC LIMIT 50
-    `).all();
-
-    const formatted = logs.map(l => {
-      let parsedPayload = null;
-      try {
-        parsedPayload = JSON.parse(l.payload);
-      } catch (e) {
-        parsedPayload = l.payload;
-      }
-      return {
-        ...l,
-        payload: parsedPayload
-      };
-    });
-
-    res.json({ success: true, logs: formatted });
+    const logs = await getWebhookLogs();
+    res.json({ success: true, logs });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// POST /api/webhooks/test - Test trigger webhook directly from frontend CRM
-router.post('/test', (req, res) => {
+// POST /api/webhooks/test - Trigger simulated test lead
+router.post('/test', async (req, res) => {
   try {
     const testLeadId = `LEAD-TEST-${Math.floor(100000 + Math.random() * 900000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
     const testPayload = {
@@ -405,7 +361,7 @@ router.post('/test', (req, res) => {
       phone: "+1 (480) 555-0199",
       email: "marcus.vance.test@solarexample.com",
       homeowner: "Yes",
-      monthly_bill: "$320",
+      monthly_bill: "10000-15000",
       budget: "$25,000",
       roof_type: "Tile",
       _source_sheet: "Summer Solar Promotion Tab",
@@ -415,60 +371,54 @@ router.post('/test', (req, res) => {
       _synced_from: "Google Apps Script Admin Simulator"
     };
 
-    // Forward internally to webhook handler logic
-    req.body = testPayload;
-    req.headers['x-crm-api-key'] = process.env.CRM_API_KEY;
-    
-    // Process upsert directly
-    const campaign = getOrCreateCampaign(testPayload._source_sheet, testPayload._source_spreadsheet_id, testPayload._source_spreadsheet_name);
+    const campaign = await getOrCreateCampaign(testPayload._source_sheet, testPayload._source_spreadsheet_id, testPayload._source_spreadsheet_name);
     const now = new Date().toISOString();
     const internalId = `lead_sb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const normBill = normalizeElectricityBill(testPayload.monthly_bill);
 
-    db.prepare(`
-      INSERT INTO leads (
-        id, crm_lead_id, source, name, phone, email, city,
-        monthly_bill, budget, homeowner, property_type, roof_type,
-        qualification, call_status, pickup_status, interest_level,
-        campaign_id, campaign_name, source_sheet, source_spreadsheet_id,
-        source_spreadsheet_name, source_row_number, synced_from,
-        raw_data, notes, created_at, updated_at
-      ) VALUES (
-        ?, ?, 'google_sheet', ?, ?, ?, 'Phoenix, AZ',
-        ?, ?, ?, 'Single Family Home', ?,
-        'Pending', 'Not Called', 'Pending', 'Pending',
-        ?, ?, ?, ?,
-        ?, ?, ?,
-        ?, '', ?, ?
-      )
-    `).run(
-      internalId,
-      testLeadId,
-      testPayload.name,
-      testPayload.phone,
-      testPayload.email,
-      testPayload.monthly_bill,
-      testPayload.budget,
-      testPayload.homeowner,
-      testPayload.roof_type,
-      campaign ? campaign.id : null,
-      testPayload._source_sheet,
-      testPayload._source_sheet,
-      testPayload._source_spreadsheet_id,
-      testPayload._source_spreadsheet_name,
-      testPayload._source_row_number,
-      testPayload._synced_from,
-      JSON.stringify({ simulated_test: true }),
-      now,
-      now
-    );
+    await upsertLead({
+      id: internalId,
+      crm_lead_id: testLeadId,
+      source: 'google_sheet',
+      name: testPayload.name,
+      phone: testPayload.phone,
+      email: testPayload.email,
+      city: 'Phoenix, AZ',
+      monthly_bill: normBill,
+      estimated_monthly_bill: normBill,
+      budget: testPayload.budget,
+      homeowner: testPayload.homeowner,
+      property_type: 'Single Family Home',
+      roof_type: testPayload.roof_type,
+      qualification: 'Pending',
+      call_status: 'Not Called',
+      pickup_status: 'Pending',
+      interest_level: 'Pending',
+      campaign_id: campaign ? campaign.id : null,
+      campaign_name: testPayload._source_sheet,
+      source_sheet: testPayload._source_sheet,
+      source_spreadsheet_id: testPayload._source_spreadsheet_id,
+      source_spreadsheet_name: testPayload._source_spreadsheet_name,
+      source_row_number: testPayload._source_row_number,
+      synced_from: testPayload._synced_from,
+      raw_data: { simulated_test: true },
+      notes: '',
+      created_at: now,
+      updated_at: now
+    });
 
-    const actId = `act_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    db.prepare(`
-      INSERT INTO activities (id, lead_id, activity_type, outcome, notes, performed_by, performed_at, metadata)
-      VALUES (?, ?, 'lead_created', 'Test Ingestion Verified', 'Simulated webhook test generated from CRM Admin Settings', 'CRM Admin', ?, ?)
-    `).run(actId, internalId, now, JSON.stringify(testPayload));
+    await addActivity({
+      id: `act_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      lead_id: internalId,
+      activity_type: 'lead_created',
+      outcome: 'Test Ingestion Verified',
+      notes: 'Simulated webhook test generated from CRM Admin Settings',
+      performed_by: 'CRM Admin',
+      performed_at: now,
+      metadata: testPayload
+    });
 
-    logWebhookEvent({
+    await logWebhookEvent({
       crm_lead_id: testLeadId,
       source_sheet: testPayload._source_sheet,
       status: 'success',
@@ -483,7 +433,7 @@ router.post('/test', (req, res) => {
       action: 'created',
       lead_id: internalId,
       crm_lead_id: testLeadId,
-      message: 'Test webhook executed and lead created in database!'
+      message: 'Test webhook executed and lead created in Supabase database!'
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

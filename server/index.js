@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { initDatabase, db } from './db.js';
+import { getDatabaseHealth, getCampaigns, isSupabaseConfigured } from './db.js';
 import webhookRouter from './routes/webhook.js';
 import leadsRouter from './routes/leads.js';
 
@@ -14,9 +14,6 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-
-// Initialize database schema
-initDatabase();
 
 // Middleware
 app.use(cors({
@@ -33,7 +30,7 @@ app.use((req, res, next) => {
   const start = Date.now();
   res.on('finish', () => {
     const duration = Date.now() - start;
-    if (!req.path.startsWith('/api/health')) {
+    if (!req.path.startsWith('/api/health') && !req.path.startsWith('/api/webhooks/leads/health')) {
       console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} -> ${res.statusCode} (${duration}ms)`);
     }
   });
@@ -46,22 +43,21 @@ app.use('/api/webhooks', webhookRouter);
 app.use('/api/leads/webhook', webhookRouter);
 app.use('/api/leads', leadsRouter);
 
-// Health & System Info Check
-app.get('/api/health', (req, res) => {
+// GET /api/health - Comprehensive System & Supabase Database Health Check
+app.get('/api/health', async (req, res) => {
   try {
-    const leadCount = db.prepare('SELECT COUNT(*) as count FROM leads').get().count;
-    const activityCount = db.prepare('SELECT COUNT(*) as count FROM activities').get().count;
-    const logCount = db.prepare('SELECT COUNT(*) as count FROM webhook_logs').get().count;
-
-    res.json({
-      status: 'healthy',
+    const dbHealth = await getDatabaseHealth();
+    res.status(dbHealth.connected ? 200 : 503).json({
+      status: dbHealth.connected ? 'healthy' : 'unhealthy',
       service: 'Solar Bunker CRM Backend API',
       version: '1.0.0',
       timestamp: new Date().toISOString(),
-      database: {
-        leadCount,
-        activityCount,
-        webhookLogCount: logCount
+      provider: dbHealth.provider,
+      connected: dbHealth.connected,
+      database: dbHealth.database,
+      config: {
+        supabaseConfigured: isSupabaseConfigured,
+        apiKeyConfigured: Boolean(process.env.CRM_API_KEY)
       }
     });
   } catch (err) {
@@ -69,16 +65,10 @@ app.get('/api/health', (req, res) => {
   }
 });
 
-// GET /api/campaigns - List all recognized campaigns/sheet tabs
-app.get('/api/campaigns', (req, res) => {
+// GET /api/campaigns - List all recognized campaigns/sheet tabs from Supabase
+app.get('/api/campaigns', async (req, res) => {
   try {
-    const campaigns = db.prepare(`
-      SELECT c.*, COUNT(l.id) as lead_count 
-      FROM campaigns c 
-      LEFT JOIN leads l ON l.campaign_id = c.id 
-      GROUP BY c.id 
-      ORDER BY c.updated_at DESC
-    `).all();
+    const campaigns = await getCampaigns();
     res.json({ success: true, campaigns });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -89,7 +79,7 @@ app.get('/api/campaigns', (req, res) => {
 const distPath = path.join(__dirname, '../dist');
 app.use(express.static(distPath));
 
-// Fallback for Single Page Application (SPA) routing in Express 5
+// Fallback for Single Page Application (SPA) routing in Express
 app.use((req, res, next) => {
   if (req.method === 'GET' && !req.path.startsWith('/api')) {
     return res.sendFile(path.join(distPath, 'index.html'), (err) => {
@@ -105,6 +95,7 @@ app.listen(PORT, () => {
   console.log(`\n======================================================`);
   console.log(`🚀 Solar Bunker CRM Backend Server Active`);
   console.log(`📡 Port: ${PORT}`);
+  console.log(`🗄️ Database: Supabase PostgreSQL (Cloud authoritative)`);
   console.log(`🔗 Local Webhook URL:  http://localhost:${PORT}/api/webhooks/leads`);
   console.log(`🌐 Public Webhook URL: ${publicUrl}/api/webhooks/leads`);
   console.log(`🔑 Webhook Header:     X-CRM-API-KEY`);

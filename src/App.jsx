@@ -7,8 +7,9 @@ import { WebhookHub } from './components/WebhookHub';
 import { LeadDetailModal } from './components/LeadDetailModal';
 import { SettingsModal } from './components/SettingsModal';
 import { AddLeadModal } from './components/AddLeadModal';
-import { getStoredLeads, getSettings, fetchLeadsFromBackend } from './services/leadStorage';
+import { getStoredLeads, getSettings, fetchLeadsFromBackend, fetchBackendHealth } from './services/leadStorage';
 import { syncFromGoogleSheet } from './services/sheetSync';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 
 export function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -16,18 +17,30 @@ export function App() {
   const [selectedLead, setSelectedLead] = useState(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddLeadOpen, setIsAddLeadOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [backendError, setBackendError] = useState(null);
 
   // Refresh leads from storage & backend
   const refreshLeads = async () => {
-    const backendLeads = await fetchLeadsFromBackend();
-    if (backendLeads && backendLeads.length > 0) {
-      setLeads(backendLeads);
-    } else {
-      setLeads(getStoredLeads());
+    setIsLoading(true);
+    try {
+      const res = await fetchLeadsFromBackend();
+      if (res.leads && Array.isArray(res.leads)) {
+        setLeads(res.leads);
+      }
+      if (res.error && !res.isOnline) {
+        setBackendError('Backend service is currently connecting (or waking up). Showing cached leads.');
+      } else {
+        setBackendError(null);
+      }
+    } catch (err) {
+      setBackendError(err.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Initial load from SQLite backend database
+  // Initial load from Supabase backend database
   useEffect(() => {
     refreshLeads();
   }, []);
@@ -63,6 +76,39 @@ export function App() {
         onOpenNewLeadModal={() => setIsAddLeadOpen(true)}
         leadsCount={leads.length}
       />
+
+      {/* Backend Status Notice */}
+      {backendError && (
+        <div style={{
+          background: 'rgba(245, 158, 11, 0.15)',
+          borderBottom: '1px solid rgba(245, 158, 11, 0.3)',
+          color: '#fbbf24',
+          padding: '0.5rem 2rem',
+          fontSize: '0.8rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <AlertCircle size={15} />
+            <span>{backendError}</span>
+          </div>
+          <button 
+            onClick={refreshLeads} 
+            style={{ 
+              background: 'transparent', 
+              color: '#fbbf24', 
+              fontSize: '0.75rem', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '0.3rem',
+              cursor: 'pointer' 
+            }}
+          >
+            <RefreshCw size={12} className={isLoading ? 'animate-spin' : ''} /> Retry Connection
+          </button>
+        </div>
+      )}
 
       {/* Main Container View */}
       <main className="main-content">

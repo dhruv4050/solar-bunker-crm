@@ -4,7 +4,20 @@ const SYNC_LOGS_STORAGE_KEY = 'solar_bunker_crm_sync_logs';
 
 const API_BASE = '/api';
 
-// Fetch leads from backend SQLite database
+// Fetch system & database health from backend
+export const fetchBackendHealth = async () => {
+  try {
+    const res = await fetch(`${API_BASE}/health`);
+    if (res.ok) {
+      return await res.json();
+    }
+    return { status: 'unhealthy', connected: false };
+  } catch (err) {
+    return { status: 'unreachable', connected: false, error: err.message };
+  }
+};
+
+// Fetch leads from backend Supabase PostgreSQL database
 export const fetchLeadsFromBackend = async () => {
   try {
     const res = await fetch(`${API_BASE}/leads`);
@@ -12,13 +25,14 @@ export const fetchLeadsFromBackend = async () => {
       const data = await res.json();
       if (data && Array.isArray(data.leads)) {
         saveLeadsToLocal(data.leads, false); // Update local cache without extra dispatch loop
-        return data.leads;
+        return { leads: data.leads, error: null, isOnline: true };
       }
     }
+    return { leads: getStoredLeads(), error: 'Backend returned invalid response', isOnline: false };
   } catch (err) {
-    console.warn('[Storage] Backend not reachable yet, reading from local cache:', err.message);
+    console.warn('[Storage] Backend not reachable yet (cold start/network), reading local cache:', err.message);
+    return { leads: getStoredLeads(), error: err.message, isOnline: false };
   }
-  return getStoredLeads();
 };
 
 // Always return leads sorted Date-Wise (newest first)
@@ -74,7 +88,7 @@ export const updateLead = async (updatedLead, authorName = "Team Member") => {
     saveLeadsToLocal(leads, true);
   }
 
-  // 2. Persist to Backend SQLite Database
+  // 2. Persist to Backend Supabase Database
   try {
     const res = await fetch(`${API_BASE}/leads/${updatedLead.id}`, {
       method: 'PATCH',
@@ -137,7 +151,7 @@ export const addLead = async (newLeadData, authorName = "Manual Entry") => {
   const leads = getStoredLeads();
   saveLeadsToLocal([leadObj, ...leads], true);
 
-  // Sync to backend SQLite
+  // Sync to backend Supabase
   try {
     const res = await fetch(`${API_BASE}/leads`, {
       method: 'POST',
@@ -177,8 +191,8 @@ export const getSettings = () => {
     autoSyncEnabled: true,
     syncIntervalMinutes: 1,
     lastSyncTime: null,
-    apiKey: "••••••••••••••••••••••••••••••••",
-    webhookUrl: `/api/webhooks/leads`,
+    apiKey: "sb_live_685682910eb67eb82ea6e31c6adc093209c5cbd5e07c32b2",
+    webhookUrl: `https://solar-bunker-crm.onrender.com/api/webhooks/leads`,
     salesReps: ["Sarah Jenkins", "Alex Rivera", "David Miller"]
   };
 
@@ -217,7 +231,7 @@ export const addSyncLog = (logItem) => {
   return updated;
 };
 
-// Fetch Webhook Inbound Logs from Backend Database
+// Fetch Webhook Inbound Logs from Backend Supabase Database
 export const fetchWebhookLogs = async () => {
   try {
     const res = await fetch(`${API_BASE}/webhooks/logs`);

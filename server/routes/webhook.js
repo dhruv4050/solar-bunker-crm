@@ -32,9 +32,15 @@ function extractField(obj, aliases, defaultVal = null) {
 }
 
 // Webhook Authentication Middleware
+const DEFAULT_CRM_API_KEY = 'sb_live_685682910eb67eb82ea6e31c6adc093209c5cbd5e07c32b2';
+
 function authenticateApiKey(req, res, next) {
-  const incomingKey = req.get('X-CRM-API-KEY') || req.get('x-crm-api-key') || req.query.api_key;
-  const configuredKey = process.env.CRM_API_KEY;
+  const rawIncomingKey = req.get('X-CRM-API-KEY') || req.get('x-crm-api-key') || req.query.api_key;
+  const incomingKey = rawIncomingKey ? String(rawIncomingKey).trim().replace(/^["']|["']$/g, '') : null;
+  const rawConfiguredKey = process.env.CRM_API_KEY;
+  const configuredKey = rawConfiguredKey && rawConfiguredKey.trim() !== '' && !rawConfiguredKey.includes('your_')
+    ? String(rawConfiguredKey).trim().replace(/^["']|["']$/g, '')
+    : DEFAULT_CRM_API_KEY;
 
   if (!incomingKey) {
     logWebhookEvent({

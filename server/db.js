@@ -3,13 +3,23 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
+const cleanEnv = (val) => val ? String(val).trim().replace(/^["']|["']$/g, '') : null;
+
+const SUPABASE_URL = cleanEnv(process.env.SUPABASE_URL);
+const rawKeyCandidates = [
+  cleanEnv(process.env.SUPABASE_SECRET_KEY),
+  cleanEnv(process.env.SUPABASE_SERVICE_ROLE_KEY),
+  cleanEnv(process.env.SUPABASE_KEY),
+  cleanEnv(process.env.SUPABASE_ANON_KEY),
+  cleanEnv(process.env.SUPABASE_PUBLISHABLE_KEY)
+].filter(k => k && k.length > 10 && !k.includes('your_') && !k.includes('placeholder'));
+
+const SUPABASE_KEY = rawKeyCandidates[0] || null;
 
 export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_KEY);
 
 if (!isSupabaseConfigured) {
-  console.error('\n[FATAL CONFIG ERROR] Supabase configuration is missing!');
+  console.error('\n[FATAL CONFIG ERROR] Supabase configuration is missing or invalid!');
   console.error('Please configure SUPABASE_URL and SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) in the environment variables.\n');
 }
 

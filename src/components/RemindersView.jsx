@@ -33,10 +33,16 @@ export const RemindersView = ({ leads, onSelectLead }) => {
   };
 
   const filteredLeads = pendingLeads.filter(lead => {
+    if (!lead) return false;
+    const name = (lead.fullName || lead.name || '').toLowerCase();
+    const phone = String(lead.phone || '');
+    const city = (lead.city || '').toLowerCase();
+    const term = (searchTerm || '').toLowerCase();
+
     const matchesSearch = 
-      lead.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead.phone.includes(searchTerm) ||
-      (lead.city && lead.city.toLowerCase().includes(searchTerm.toLowerCase()));
+      name.includes(term) ||
+      phone.includes(searchTerm) ||
+      city.includes(term);
 
     const nextStage = getNextPendingStage(lead);
     const matchesStage = selectedStageFilter === 'ALL' || nextStage === Number(selectedStageFilter);

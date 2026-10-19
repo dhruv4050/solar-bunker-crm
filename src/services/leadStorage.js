@@ -29,6 +29,24 @@ export const fetchBackendHealth = async () => {
   }
 };
 
+// Ensure lead objects always have required fields to prevent downstream TypeError crashes
+export const normalizeLead = (lead) => {
+  if (!lead || typeof lead !== 'object') return null;
+  return {
+    ...lead,
+    fullName: lead.fullName || lead.name || 'Solar Lead',
+    name: lead.name || lead.fullName || 'Solar Lead',
+    phone: String(lead.phone || ''),
+    email: lead.email || '',
+    city: lead.city || 'N/A',
+    qualification: lead.qualification || 'Pending',
+    callStatus: lead.callStatus || 'Not Called',
+    pickupStatus: lead.pickupStatus || 'Pending',
+    meetingBooked: Boolean(lead.meetingBooked),
+    followUpSequence: Array.isArray(lead.followUpSequence) ? lead.followUpSequence : []
+  };
+};
+
 // Fetch leads from backend Supabase PostgreSQL database
 export const fetchLeadsFromBackend = async () => {
   try {
@@ -36,8 +54,9 @@ export const fetchLeadsFromBackend = async () => {
     if (res.ok) {
       const data = await res.json();
       if (data && Array.isArray(data.leads)) {
-        saveLeadsToLocal(data.leads, false); // Update local cache without extra dispatch loop
-        return { leads: data.leads, error: null, isOnline: true };
+        const normalized = data.leads.map(normalizeLead).filter(Boolean);
+        saveLeadsToLocal(normalized, false); // Update local cache without extra dispatch loop
+        return { leads: normalized, error: null, isOnline: true };
       }
     }
     if (res.status === 401 || res.status === 403) {
@@ -58,7 +77,11 @@ export const getStoredLeads = () => {
       return [];
     }
     const parsed = JSON.parse(data);
-    return parsed.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(normalizeLead)
+      .filter(Boolean)
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
   } catch (err) {
     console.error("Error reading leads from storage:", err);
     return [];

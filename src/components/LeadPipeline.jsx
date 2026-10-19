@@ -12,13 +12,21 @@ export const LeadPipeline = ({ leads, onSelectLead, onRefreshLeads }) => {
   const [filterQual, setFilterQual] = useState('ALL');
   const [filterMeeting, setFilterMeeting] = useState('ALL');
 
-  const filteredLeads = leads.filter(lead => {
+  const filteredLeads = (Array.isArray(leads) ? leads : []).filter(lead => {
+    if (!lead) return false;
+    const name = (lead.fullName || lead.name || '').toLowerCase();
+    const phone = String(lead.phone || '');
+    const email = (lead.email || '').toLowerCase();
+    const city = (lead.city || '').toLowerCase();
+    const campaign = (lead.metaAdCampaign || '').toLowerCase();
+    const term = (searchTerm || '').toLowerCase();
+
     const matchesSearch = 
-      lead.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead.phone.includes(searchTerm) ||
-      (lead.email && lead.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (lead.city && lead.city.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (lead.metaAdCampaign && lead.metaAdCampaign.toLowerCase().includes(searchTerm.toLowerCase()));
+      name.includes(term) ||
+      phone.includes(searchTerm) ||
+      email.includes(term) ||
+      city.includes(term) ||
+      campaign.includes(term);
 
     const matchesCall = filterCallStatus === 'ALL' || lead.callStatus === filterCallStatus;
     const matchesQual = filterQual === 'ALL' || lead.qualification === filterQual;

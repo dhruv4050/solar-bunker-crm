@@ -96,22 +96,6 @@ export function App() {
 
 
 
-  // Count pending follow-up leads for the header badge
-  const pendingRemindersCount = leads.filter(l => {
-    if (l.pickupStatus === 'Picked Up') return false;
-    if (l.qualification === 'Unqualified') return false;
-    if (l.meetingBooked) return false;
-    const seq = l.followUpSequence || [];
-    return seq.filter(s => s.completed).length < 5;
-  }).length;
-
-  const handleOpenLeadModal = (lead, defaultTab = 'source') => {
-    setSelectedLead(lead);
-    setLeadModalTab(defaultTab);
-  };
-
-  const role = currentUser?.role || 'admin';
-
   if (!currentUser) {
     return (
       <LoginModal 
@@ -123,6 +107,23 @@ export function App() {
       />
     );
   }
+
+  // Count pending follow-up leads for the header badge
+  const pendingRemindersCount = (Array.isArray(leads) ? leads : []).filter(l => {
+    if (!l) return false;
+    if (l.pickupStatus === 'Picked Up') return false;
+    if (l.qualification === 'Unqualified') return false;
+    if (l.meetingBooked) return false;
+    const seq = Array.isArray(l.followUpSequence) ? l.followUpSequence : [];
+    return seq.filter(s => s?.completed).length < 5;
+  }).length;
+
+  const handleOpenLeadModal = (lead, defaultTab = 'source') => {
+    setSelectedLead(lead);
+    setLeadModalTab(defaultTab);
+  };
+
+  const role = currentUser?.role || 'admin';
 
   return (
     <div className="app-container">

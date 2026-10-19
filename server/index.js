@@ -17,19 +17,42 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Configurable CORS Whitelist (allows dev servers and Google Apps Script server-to-server requests)
+// Configurable CORS Whitelist (allows production URL, Render subdomains, dev servers, and webhooks)
+const defaultAllowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
+  'http://localhost:3001',
+  'https://solar-bunker-crm.onrender.com'
+];
+
+if (process.env.PUBLIC_URL) {
+  defaultAllowedOrigins.push(process.env.PUBLIC_URL.replace(/\/$/, ''));
+}
+if (process.env.RENDER_EXTERNAL_URL) {
+  defaultAllowedOrigins.push(process.env.RENDER_EXTERNAL_URL.replace(/\/$/, ''));
+}
+
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()) 
-  : ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173', 'http://localhost:3001'];
+  ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim().replace(/\/$/, '')) 
+  : defaultAllowedOrigins;
 
 app.use(cors({
   origin: (origin, callback) => {
     // Allow non-browser requests (Google Apps Script, curl, server-to-server webhooks)
     if (!origin) return callback(null, true);
-    if (process.env.NODE_ENV !== 'production' || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+
+    // Check if origin matches allowed origins or is an onrender.com host
+    const isExplicitlyAllowed = allowedOrigins.includes(origin) || allowedOrigins.includes('*');
+    const isRenderDomain = /^https:\/\/[a-zA-Z0-9-]+\.onrender\.com$/.test(origin);
+    const isDevEnv = process.env.NODE_ENV !== 'production';
+
+    if (isDevEnv || isExplicitlyAllowed || isRenderDomain) {
       return callback(null, true);
     }
-    return callback(new Error(`CORS blocked for origin: ${origin}`));
+
+    console.warn(`[CORS] Rejected request from unauthorized origin: ${origin}`);
+    return callback(null, false);
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-CRM-API-KEY', 'x-crm-api-key'],

@@ -71,7 +71,14 @@ export function getCurrentUser() {
   try {
     const raw = localStorage.getItem(AUTH_USER_KEY);
     if (raw) {
-      currentProfile = JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      // Evict legacy mock personas from earlier iterations (e.g. admin-1, caller-1, tech-1)
+      if (parsed && (!parsed.email || parsed.id === 'admin-1' || parsed.id === 'caller-1' || parsed.id === 'tech-1')) {
+        console.warn('[Auth] Evicting legacy mock profile from localStorage:', parsed.id);
+        localStorage.removeItem(AUTH_USER_KEY);
+        return null;
+      }
+      currentProfile = parsed;
       return currentProfile;
     }
   } catch (err) {

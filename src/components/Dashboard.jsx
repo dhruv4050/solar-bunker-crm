@@ -29,11 +29,17 @@ export const Dashboard = ({ leads, onSelectLead, setActiveTab, onOpenSettings, o
     .slice(0, 4);
 
   // Table filtering
-  const filteredRecentLeads = leads.filter(lead => {
+  const filteredRecentLeads = (Array.isArray(leads) ? leads : []).filter(lead => {
+    if (!lead) return false;
+    const name = (lead.fullName || lead.name || '').toLowerCase();
+    const phone = String(lead.phone || '');
+    const city = (lead.city || '').toLowerCase();
+    const term = (searchTerm || '').toLowerCase();
+
     const matchesSearch = 
-      lead.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead.phone.includes(searchTerm) ||
-      (lead.city && lead.city.toLowerCase().includes(searchTerm.toLowerCase()));
+      name.includes(term) ||
+      phone.includes(searchTerm) ||
+      city.includes(term);
 
     if (!matchesSearch) return false;
 

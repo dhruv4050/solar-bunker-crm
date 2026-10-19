@@ -1,10 +1,22 @@
+import { getAuthToken } from './authService';
+
 const LEADS_STORAGE_KEY = 'solar_bunker_crm_leads';
 const SETTINGS_STORAGE_KEY = 'solar_bunker_crm_settings';
 const SYNC_LOGS_STORAGE_KEY = 'solar_bunker_crm_sync_logs';
 
 const API_BASE = '/api';
 
-// Fetch system & database health from backend
+// Authenticated fetch helper for attaching Supabase Bearer token
+const authFetch = async (url, options = {}) => {
+  const token = await getAuthToken();
+  const headers = { ...(options.headers || {}) };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return fetch(url, { ...options, headers });
+};
+
+// Fetch system & database health from backend (Public health check)
 export const fetchBackendHealth = async () => {
   try {
     const res = await fetch(`${API_BASE}/health`);
@@ -20,13 +32,16 @@ export const fetchBackendHealth = async () => {
 // Fetch leads from backend Supabase PostgreSQL database
 export const fetchLeadsFromBackend = async () => {
   try {
-    const res = await fetch(`${API_BASE}/leads`);
+    const res = await authFetch(`${API_BASE}/leads`);
     if (res.ok) {
       const data = await res.json();
       if (data && Array.isArray(data.leads)) {
         saveLeadsToLocal(data.leads, false); // Update local cache without extra dispatch loop
         return { leads: data.leads, error: null, isOnline: true };
       }
+    }
+    if (res.status === 401 || res.status === 403) {
+      return { leads: getStoredLeads(), error: 'Unauthorized or session expired', isOnline: false };
     }
     return { leads: getStoredLeads(), error: 'Backend returned invalid response', isOnline: false };
   } catch (err) {
@@ -90,7 +105,7 @@ export const updateLead = async (updatedLead, authorName = "Team Member") => {
 
   // 2. Persist to Backend Supabase Database
   try {
-    const res = await fetch(`${API_BASE}/leads/${updatedLead.id}`, {
+    const res = await authFetch(`${API_BASE}/leads/${updatedLead.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...updatedLead, authorName })
@@ -130,6 +145,18 @@ export const addLead = async (newLeadData, authorName = "Manual Entry") => {
     qualification: newLeadData.qualification || "Pending",
     interestLevel: newLeadData.interestLevel || "Pending",
     callTimestamp: newLeadData.callTimestamp || null,
+    assignedTechnicianId: newLeadData.assignedTechnicianId || null,
+    assignedTechnicianName: newLeadData.assignedTechnicianName || null,
+    assignedTechnicianEmail: newLeadData.assignedTechnicianEmail || null,
+    followUpSequence: newLeadData.followUpSequence || [1, 2, 3, 4, 5].map(stg => ({
+      stage: stg,
+      label: `Follow-Up ${stg}`,
+      completed: false,
+      timestamp: null
+    })),
+    siteVisitStatus: newLeadData.siteVisitStatus || 'Pending',
+    siteVisitNotes: newLeadData.siteVisitNotes || '',
+    siteVisitedAt: newLeadData.siteVisitedAt || null,
     meetingBooked: newLeadData.meetingBooked || false,
     meetingDate: newLeadData.meetingDate || null,
     meetingTimeSlot: newLeadData.meetingTimeSlot || null,
@@ -153,7 +180,7 @@ export const addLead = async (newLeadData, authorName = "Manual Entry") => {
 
   // Sync to backend Supabase
   try {
-    const res = await fetch(`${API_BASE}/leads`, {
+    const res = await authFetch(`${API_BASE}/leads`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...leadObj, authorName })
@@ -178,7 +205,7 @@ export const clearAllLeads = async () => {
   window.dispatchEvent(new CustomEvent('solar_bunker_leads_updated'));
 
   try {
-    await fetch(`${API_BASE}/leads`, { method: 'DELETE' });
+    await authFetch(`${API_BASE}/leads`, { method: 'DELETE' });
   } catch (e) {}
 
   return [];
@@ -231,10 +258,10 @@ export const addSyncLog = (logItem) => {
   return updated;
 };
 
-// Fetch Webhook Inbound Logs from Backend Supabase Database
+// Fetch Webhook Inbound Logs from Backend Supabase Database (Admin Only)
 export const fetchWebhookLogs = async () => {
   try {
-    const res = await fetch(`${API_BASE}/webhooks/logs`);
+    const res = await authFetch(`${API_BASE}/webhooks/logs`);
     if (res.ok) {
       const data = await res.json();
       return data.logs || [];
@@ -245,10 +272,10 @@ export const fetchWebhookLogs = async () => {
   return [];
 };
 
-// Trigger a Test Webhook from UI
+// Trigger a Test Webhook from UI (Admin Only)
 export const sendTestWebhook = async () => {
   try {
-    const res = await fetch(`${API_BASE}/webhooks/test`, {
+    const res = await authFetch(`${API_BASE}/webhooks/test`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     });

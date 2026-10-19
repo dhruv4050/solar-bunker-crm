@@ -9,7 +9,8 @@
     "start": "node server/index.js",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "admin:bootstrap": "node scripts/bootstrap-admin.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",

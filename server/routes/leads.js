@@ -6,20 +6,34 @@ import {
   updateLeadDetails, 
   addActivity, 
   deleteLeadById, 
-  clearAllDatabase,
-  formatLead,
+  clearAllDatabase, 
+  formatLead, 
   normalizeElectricityBill 
 } from '../db.js';
+import { authenticateUser, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// Enforce cryptographic session authentication on all lead endpoints
+router.use(authenticateUser);
+
 /**
  * GET /api/leads
- * List all leads sorted newest first with optional search & filtering
+ * Admin & Caller: List all leads with search and filter capabilities.
+ * Technician: Restricted strictly to scheduled consultations assigned to them.
  */
 router.get('/', async (req, res) => {
   try {
-    const leads = await getLeads(req.query);
+    const filters = { ...req.query };
+
+    // Strict role enforcement for Site Technicians
+    if (req.user.role === 'technician') {
+      filters.technician_user_id = req.user.id;
+      filters.technician_email = req.user.email;
+      filters.meeting_booked = 'true';
+    }
+
+    const leads = await getLeads(filters);
     res.json({ success: true, count: leads.length, leads });
   } catch (err) {
     console.error('[Leads API] Error fetching leads:', err);
@@ -29,7 +43,8 @@ router.get('/', async (req, res) => {
 
 /**
  * GET /api/leads/:id
- * Retrieve a single lead and full activity history
+ * Retrieve a single lead and full activity history.
+ * Technician access is strictly verified by meeting assignment.
  */
 router.get('/:id', async (req, res) => {
   try {
@@ -37,6 +52,22 @@ router.get('/:id', async (req, res) => {
     if (!lead) {
       return res.status(404).json({ success: false, error: 'Lead not found' });
     }
+
+    // Role boundary: Technicians cannot view unassigned leads or full sales pipeline
+    if (req.user.role === 'technician') {
+      const isAssigned = lead.meetingBooked && (
+        lead.assignedTechnicianId === req.user.id || 
+        lead.assignedTechnicianEmail === req.user.email
+      );
+      if (!isAssigned) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden',
+          message: 'Access denied. You are not assigned to this consultation or site inspection.'
+        });
+      }
+    }
+
     res.json({ success: true, lead });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -45,9 +76,10 @@ router.get('/:id', async (req, res) => {
 
 /**
  * POST /api/leads
- * Create lead manually from UI
+ * Create lead manually from UI.
+ * Restricted to Administrator and Telecaller.
  */
-router.post('/', async (req, res) => {
+router.post('/', requireRole('admin', 'caller'), async (req, res) => {
   try {
     const data = req.body;
     const now = new Date().toISOString();
@@ -73,6 +105,15 @@ router.post('/', async (req, res) => {
       call_status: 'Not Called',
       pickup_status: 'Pending',
       interest_level: 'Pending',
+      meeting_booked: Boolean(data.meetingBooked || data.meeting_booked),
+      meeting_date: data.meetingDate || data.meeting_date || null,
+      meeting_time_slot: data.meetingTimeSlot || data.meeting_time_slot || null,
+      meeting_notes: data.meetingNotes || data.meeting_notes || '',
+      site_visit_status: data.siteVisitStatus || data.site_visit_status || 'Pending',
+      site_visit_notes: data.siteVisitNotes || data.site_visit_notes || '',
+      assigned_technician_id: data.assignedTechnicianId || null,
+      assigned_technician_name: data.assignedTechnicianName || null,
+      assigned_technician_email: data.assignedTechnicianEmail || null,
       raw_data: data.extraFields || {},
       notes: data.notes || '',
       created_at: now,
@@ -85,8 +126,8 @@ router.post('/', async (req, res) => {
       lead_id: id,
       activity_type: 'lead_created',
       outcome: 'Lead Created Manually',
-      notes: 'Manually created in Solar Bunker CRM',
-      performed_by: data.authorName || 'Sales Rep',
+      notes: `Manually created by ${req.user.name} (${req.user.role})`,
+      performed_by: req.user.name || 'Sales Rep',
       performed_at: now
     });
 
@@ -98,7 +139,9 @@ router.post('/', async (req, res) => {
 
 /**
  * PATCH /api/leads/:id
- * Update lead details (Call status, qualification, meeting bookings, notes, etc.)
+ * Update lead details.
+ * Technicians can ONLY update site visit verification and inspection notes on their assigned meetings.
+ * Direct API calls or modified parameters cannot alter qualifications or other leads.
  */
 router.patch('/:id', async (req, res) => {
   try {
@@ -111,6 +154,54 @@ router.patch('/:id', async (req, res) => {
     const updates = req.body;
     const dbUpdates = {};
 
+    // Strict boundary for Technicians
+    if (req.user.role === 'technician') {
+      const isAssigned = existing.meetingBooked && (
+        existing.assignedTechnicianId === req.user.id || 
+        existing.assignedTechnicianEmail === req.user.email
+      );
+
+      if (!isAssigned) {
+        return res.status(403).json({
+          success: false,
+          error: 'Forbidden',
+          message: 'Access denied. You cannot modify a consultation not assigned to you.'
+        });
+      }
+
+      // Technicians can only modify site visit verification fields
+      if (updates.siteVisitStatus !== undefined) dbUpdates.site_visit_status = updates.siteVisitStatus;
+      if (updates.siteVisitNotes !== undefined) dbUpdates.site_visit_notes = updates.siteVisitNotes;
+      if (updates.siteVisitedAt !== undefined) dbUpdates.site_visited_at = updates.siteVisitedAt;
+      if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
+
+      // Persist extra metadata in raw_data JSON
+      const existingRaw = typeof existing.raw_data === 'string' 
+        ? JSON.parse(existing.raw_data || '{}') 
+        : (existing.raw_data || existing.extraFields || {});
+      
+      dbUpdates.raw_data = {
+        ...existingRaw,
+        ...(updates.siteVisitStatus !== undefined ? { siteVisitStatus: updates.siteVisitStatus } : {}),
+        ...(updates.siteVisitNotes !== undefined ? { siteVisitNotes: updates.siteVisitNotes } : {}),
+        ...(updates.siteVisitedAt !== undefined ? { siteVisitedAt: updates.siteVisitedAt } : {})
+      };
+
+      const updated = await updateLeadDetails(leadId, dbUpdates);
+
+      await addActivity({
+        lead_id: leadId,
+        activity_type: 'site_visit_update',
+        outcome: `Site Visit: ${updates.siteVisitStatus || 'Updated'}`,
+        notes: updates.siteVisitNotes || updates.notes || `Site inspection updated by ${req.user.name}`,
+        performed_by: req.user.name,
+        performed_at: new Date().toISOString()
+      });
+
+      return res.json({ success: true, lead: updated });
+    }
+
+    // Admin & Caller update handling
     if (updates.fullName !== undefined || updates.name !== undefined) {
       dbUpdates.name = updates.fullName || updates.name;
     }
@@ -150,10 +241,34 @@ router.patch('/:id', async (req, res) => {
     }
     if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
 
+    // Technician assignment
+    if (updates.assignedTechnicianId !== undefined) dbUpdates.assigned_technician_id = updates.assignedTechnicianId;
+    if (updates.assignedTechnicianName !== undefined) dbUpdates.assigned_technician_name = updates.assignedTechnicianName;
+    if (updates.assignedTechnicianEmail !== undefined) dbUpdates.assigned_technician_email = updates.assignedTechnicianEmail;
+    if (updates.siteVisitStatus !== undefined) dbUpdates.site_visit_status = updates.siteVisitStatus;
+    if (updates.siteVisitNotes !== undefined) dbUpdates.site_visit_notes = updates.siteVisitNotes;
+    if (updates.siteVisitedAt !== undefined) dbUpdates.site_visited_at = updates.siteVisitedAt;
+
+    // Persist extra metadata (follow-up sequence, site visit info) in raw_data JSON
+    const existingRaw = typeof existing.raw_data === 'string' 
+      ? JSON.parse(existing.raw_data || '{}') 
+      : (existing.raw_data || existing.extraFields || {});
+    const updatedRaw = {
+      ...existingRaw,
+      ...(updates.followUpSequence !== undefined ? { followUpSequence: updates.followUpSequence } : {}),
+      ...(updates.siteVisitStatus !== undefined ? { siteVisitStatus: updates.siteVisitStatus } : {}),
+      ...(updates.siteVisitNotes !== undefined ? { siteVisitNotes: updates.siteVisitNotes } : {}),
+      ...(updates.siteVisitedAt !== undefined ? { siteVisitedAt: updates.siteVisitedAt } : {}),
+      ...(updates.assignedTechnicianId !== undefined ? { assignedTechnicianId: updates.assignedTechnicianId } : {}),
+      ...(updates.assignedTechnicianName !== undefined ? { assignedTechnicianName: updates.assignedTechnicianName } : {}),
+      ...(updates.assignedTechnicianEmail !== undefined ? { assignedTechnicianEmail: updates.assignedTechnicianEmail } : {})
+    };
+    dbUpdates.raw_data = updatedRaw;
+
     const updated = await updateLeadDetails(leadId, dbUpdates);
 
     // Record activity audit trail
-    const author = updates.authorName || updates.performed_by || 'Sales Rep';
+    const author = req.user.name || updates.authorName || 'Staff Member';
     const activityDesc = updates.activityDescription || updates.notes || `Updated details for ${existing.fullName || existing.name}`;
     const activityOutcome = updates.outcome || (updates.meetingBooked ? 'Meeting Booked' : updates.callStatus === 'Called' ? 'Call Completed' : 'Details Updated');
     const actType = updates.activityType || (updates.meetingBooked ? 'meeting_scheduled' : updates.callStatus === 'Called' ? 'call' : 'update');
@@ -176,7 +291,7 @@ router.patch('/:id', async (req, res) => {
 
 /**
  * POST /api/leads/:id/activities
- * Add call activity, outcome, notes, and schedule follow-ups
+ * Add call activity, outcome, notes, and schedule follow-ups.
  */
 router.post('/:id/activities', async (req, res) => {
   try {
@@ -186,11 +301,20 @@ router.post('/:id/activities', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Lead not found' });
     }
 
+    if (req.user.role === 'technician') {
+      const isAssigned = lead.meetingBooked && (
+        lead.assignedTechnicianId === req.user.id || 
+        lead.assignedTechnicianEmail === req.user.email
+      );
+      if (!isAssigned) {
+        return res.status(403).json({ success: false, error: 'Forbidden', message: 'You are not assigned to this consultation.' });
+      }
+    }
+
     const {
       activity_type,
       outcome,
       notes,
-      performed_by,
       next_follow_up_at,
       update_lead_status,
       qualification,
@@ -204,7 +328,7 @@ router.post('/:id/activities', async (req, res) => {
       activity_type: activity_type || 'call',
       outcome: outcome || 'Activity Logged',
       notes: notes || '',
-      performed_by: performed_by || 'AI Voice Agent',
+      performed_by: req.user.name || 'Sales Rep',
       performed_at: new Date().toISOString(),
       next_follow_up_at: next_follow_up_at || null
     });
@@ -234,8 +358,9 @@ router.post('/:id/activities', async (req, res) => {
 
 /**
  * DELETE /api/leads/:id
+ * Strictly restricted to Administrator.
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireRole('admin'), async (req, res) => {
   try {
     await deleteLeadById(req.params.id);
     res.json({ success: true, message: 'Lead deleted' });
@@ -246,8 +371,9 @@ router.delete('/:id', async (req, res) => {
 
 /**
  * DELETE /api/leads
+ * Clear database — Strictly restricted to Administrator.
  */
-router.delete('/', async (req, res) => {
+router.delete('/', requireRole('admin'), async (req, res) => {
   try {
     await clearAllDatabase();
     res.json({ success: true, message: 'All leads and activities cleared.' });

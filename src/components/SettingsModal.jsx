@@ -1,27 +1,46 @@
 import React, { useState } from 'react';
-import { X, Save, RefreshCw, Download, Upload, Check, Copy, Key, Link2, Trash2 } from 'lucide-react';
-import { getSettings, saveSettings, clearAllLeads, getStoredLeads, saveLeads } from '../services/leadStorage';
-import { syncFromGoogleSheet } from '../services/sheetSync';
+import { 
+  X, Save, Download, Check, Copy, Key, 
+  Trash2, Users, Shield, User, Wrench, Plus
+} from 'lucide-react';
+import { getSettings, saveSettings, clearAllLeads, getStoredLeads } from '../services/leadStorage';
+import { getAllUsers, addUser, deleteUser, updateUserRole, getCurrentUser } from '../services/authService';
 
 export const SettingsModal = ({ onClose, onRefreshLeads }) => {
   const [settings, setSettings] = useState(getSettings());
-  const [googleSheetUrl, setGoogleSheetUrl] = useState(settings.googleSheetUrl || '');
-  const [autoSyncEnabled, setAutoSyncEnabled] = useState(settings.autoSyncEnabled !== false);
-  const [syncIntervalMinutes, setSyncIntervalMinutes] = useState(settings.syncIntervalMinutes || 1);
   const [isSaved, setIsSaved] = useState(false);
-  const [isSyncingNow, setIsSyncingNow] = useState(false);
-  const [syncMsg, setSyncMsg] = useState('');
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
 
+  // User Accounts & Role Management State
+  const [users, setUsers] = useState([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberEmail, setNewMemberEmail] = useState('');
+  const [newMemberPassword, setNewMemberPassword] = useState('');
+  const [newMemberRole, setNewMemberRole] = useState('caller');
+  const [userActionMsg, setUserActionMsg] = useState('');
+
+  const currentUser = getCurrentUser();
+
+  const loadUsers = async () => {
+    setIsLoadingUsers(true);
+    try {
+      const u = await getAllUsers();
+      setUsers(u);
+    } catch (err) {
+      console.error('Failed to load users:', err);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  React.useEffect(() => {
+    loadUsers();
+  }, []);
+
   const handleSave = () => {
-    const updated = {
-      ...settings,
-      googleSheetUrl,
-      autoSyncEnabled,
-      syncIntervalMinutes
-    };
-    saveSettings(updated);
+    saveSettings(settings);
     setIsSaved(true);
     setTimeout(() => {
       setIsSaved(false);
@@ -29,23 +48,11 @@ export const SettingsModal = ({ onClose, onRefreshLeads }) => {
     }, 500);
   };
 
-  const handleTestAndSync = async () => {
-    setIsSyncingNow(true);
-    setSyncMsg('');
-    const updatedSettings = { ...settings, googleSheetUrl };
-    saveSettings(updatedSettings);
-
-    const res = await syncFromGoogleSheet(googleSheetUrl);
-    setIsSyncingNow(false);
-    setSyncMsg(res.message || 'Sync completed.');
-    onRefreshLeads();
-  };
-
   const handleClearDatabase = () => {
     if (window.confirm("Are you sure you want to clear all leads from the CRM database?")) {
       clearAllLeads();
       onRefreshLeads();
-      setSyncMsg("Database cleared.");
+      setUserActionMsg("Database cleared successfully.");
     }
   };
 
@@ -60,22 +67,74 @@ export const SettingsModal = ({ onClose, onRefreshLeads }) => {
   };
 
   const handleCopyKey = () => {
-    navigator.clipboard.writeText(settings.apiKey || 'sb_live_key_998822');
+    navigator.clipboard.writeText(settings.apiKey || 'sb_live_685682910eb67eb82ea6e31c6adc093209c5cbd5e07c32b2');
     setCopiedKey(true);
     setTimeout(() => setCopiedKey(false), 2000);
   };
 
   const handleCopyWebhook = () => {
-    navigator.clipboard.writeText(settings.webhookUrl || `${window.location.origin}/api/webhooks/leads`);
+    navigator.clipboard.writeText(settings.webhookUrl || `http://localhost:3001/api/webhooks/leads`);
     setCopiedWebhook(true);
     setTimeout(() => setCopiedWebhook(false), 2000);
+  };
+
+  // Role Promotion / Demotion Handlers
+  const handleRoleChange = async (userId, newRole) => {
+    try {
+      await updateUserRole(userId, newRole);
+      await loadUsers();
+      setUserActionMsg(`User role updated to ${newRole.toUpperCase()}`);
+      setTimeout(() => setUserActionMsg(''), 4000);
+    } catch (err) {
+      setUserActionMsg(`Error: ${err.message}`);
+    }
+  };
+
+  const handleCreateMember = async (e) => {
+    e.preventDefault();
+    if (!newMemberName || !newMemberEmail) return;
+
+    try {
+      const created = await addUser({
+        name: newMemberName.trim(),
+        email: newMemberEmail.trim(),
+        role: newMemberRole,
+        password: newMemberPassword.trim() || undefined
+      });
+      await loadUsers();
+      setNewMemberName('');
+      setNewMemberEmail('');
+      setNewMemberPassword('');
+      const pwMsg = created.temporaryPassword ? ` (Temporary Password: ${created.temporaryPassword})` : '';
+      setUserActionMsg(`Account created for ${newMemberEmail}${pwMsg}`);
+      setTimeout(() => setUserActionMsg(''), 10000);
+    } catch (err) {
+      setUserActionMsg(`Error: ${err.message}`);
+    }
+  };
+
+  const handleDeleteMember = async (userId) => {
+    const adminCount = users.filter(u => u.role === 'admin').length;
+    const targetUser = users.find(u => u.id === userId);
+    if (targetUser?.role === 'admin' && adminCount <= 1) {
+      alert("Cannot delete the only administrator account to prevent lockout.");
+      return;
+    }
+    if (window.confirm("Are you sure you want to permanently delete this team profile?")) {
+      try {
+        await deleteUser(userId);
+        await loadUsers();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
   };
 
   return (
     <div style={{
       position: 'fixed',
       top: 0, left: 0, right: 0, bottom: 0,
-      background: 'rgba(5, 8, 15, 0.85)',
+      background: 'rgba(15, 23, 42, 0.45)',
       backdropFilter: 'blur(8px)',
       zIndex: 110,
       display: 'flex',
@@ -85,159 +144,281 @@ export const SettingsModal = ({ onClose, onRefreshLeads }) => {
     }}>
       <div className="glass-panel animate-fade-in" style={{
         width: '100%',
-        maxWidth: '700px',
+        maxWidth: '820px',
         maxHeight: '90vh',
         overflowY: 'auto',
         borderRadius: 'var(--radius-lg)',
         border: '1px solid var(--border-color)',
+        display: 'flex',
+        flexDirection: 'column',
+        boxShadow: 'var(--shadow-modal)'
       }}>
         
         {/* Header */}
         <div style={{
-          padding: '1.25rem 1.5rem',
+          padding: '1.25rem 1.75rem',
           borderBottom: '1px solid var(--border-color)',
-          background: 'var(--bg-card)',
+          background: '#ffffff',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center'
         }}>
           <div>
-            <h2 style={{ fontSize: '1.2rem', color: '#fff', margin: 0 }}>CRM Settings & Integration Setup</h2>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>Google Sheet Sync & Automation Webhook Credentials</p>
+            <h2 style={{ fontSize: '1.25rem', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 800 }}>
+              <Shield size={20} color="var(--accent-solar)" />
+              Admin Panel & Settings
+            </h2>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
+              Manage team accounts, promote/demote user roles, and retrieve webhook credentials
+            </p>
           </div>
-          <button onClick={onClose} style={{ background: 'transparent', color: 'var(--text-muted)' }}>
-            <X size={20} />
+          <button 
+            onClick={onClose} 
+            style={{ 
+              background: '#f1f5f9', 
+              color: 'var(--text-muted)', 
+              borderRadius: '50%', 
+              padding: '0.45rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <X size={18} />
           </button>
         </div>
 
         {/* Form Body */}
-        <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <div style={{ padding: '1.5rem 1.75rem', display: 'flex', flexDirection: 'column', gap: '1.5rem', flex: 1, background: '#f8fafc' }}>
           
-          {/* Section 1: Google Sheet Link */}
-          <div style={{ background: 'var(--bg-card)', padding: '1.25rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
-            <h3 style={{ fontSize: '0.95rem', color: 'var(--accent-solar)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Link2 size={16} /> Meta Ads Google Sheet Link
-            </h3>
-            
-            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
-              Paste your Google Sheet link or Published CSV link:
-            </label>
+          {/* SECTION 1: TEAM ACCOUNTS & ROLE PROMOTION / DEMOTION */}
+          <div style={{
+            background: '#ffffff',
+            padding: '1.25rem',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-color)',
+            boxShadow: 'var(--shadow-card)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.05rem', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700 }}>
+                  <Users size={18} color="var(--accent-solar)" />
+                  Team Accounts & Role Management
+                </h3>
+                <p style={{ fontSize: '0.775rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
+                  Admin (Owner) has full access. Callers manage pipeline & follow-up queue. Technicians verify site visits.
+                </p>
+              </div>
 
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-              <input 
-                type="text"
-                value={googleSheetUrl}
-                onChange={(e) => setGoogleSheetUrl(e.target.value)}
-                placeholder="https://docs.google.com/spreadsheets/d/.../edit or pub link"
-                style={{ flex: 1, fontSize: '0.85rem' }}
-              />
-              <button 
-                onClick={handleTestAndSync}
-                disabled={isSyncingNow}
-                className="btn-primary" 
-                style={{ fontSize: '0.8rem', whiteSpace: 'nowrap' }}
-              >
-                <RefreshCw size={14} style={{ animation: isSyncingNow ? 'spin 1s linear infinite' : 'none' }} />
-                {isSyncingNow ? 'Syncing...' : 'Sync & Test Now'}
-              </button>
+              <span className="badge badge-called" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}>
+                {users.length} Active Accounts
+              </span>
             </div>
 
-            {syncMsg && (
-              <div style={{ fontSize: '0.8rem', color: syncMsg.includes('Error') || syncMsg.includes('No') ? 'var(--accent-rose)' : '#10b981', fontWeight: 600 }}>
-                {syncMsg}
+            {userActionMsg && (
+              <div style={{ fontSize: '0.8rem', color: '#059669', background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '0.4rem 0.8rem', borderRadius: 'var(--radius-sm)', marginBottom: '0.85rem' }}>
+                ✓ {userActionMsg}
               </div>
             )}
 
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', margin: '0.3rem 0 0 0' }}>
-              Supports both direct Google Sheet edit URLs and published CSV links. The CRM will read Meta Ad columns: <code>full_name</code>, <code>phone_number</code>, <code>email</code>, <code>city</code>, <code>monthly_electric_bill</code>.
-            </p>
-          </div>
+            {/* Existing Accounts List */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginBottom: '1.25rem' }}>
+              {users.map(u => {
+                const isCurrent = u.id === currentUser?.id;
+                const roleBadgeColor = 
+                  u.role === 'admin' ? 'var(--accent-solar)' : 
+                  u.role === 'caller' ? 'var(--accent-teal)' : 'var(--accent-purple)';
 
-          {/* Section 2: Auto-Sync Controls */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                Auto-Sync Interval
-              </label>
-              <select 
-                value={syncIntervalMinutes}
-                onChange={(e) => setSyncIntervalMinutes(Number(e.target.value))}
-                style={{ width: '100%' }}
-              >
-                <option value={0.5}>Every 30 Seconds</option>
-                <option value={1}>Every 1 Minute</option>
-                <option value={5}>Every 5 Minutes</option>
-                <option value={15}>Every 15 Minutes</option>
-              </select>
+                return (
+                  <div
+                    key={u.id}
+                    style={{
+                      background: '#f8fafc',
+                      border: '1px solid var(--border-color)',
+                      padding: '0.85rem 1rem',
+                      borderRadius: 'var(--radius-sm)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '0.75rem'
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <strong style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>{u.name}</strong>
+                        {isCurrent && (
+                          <span style={{ fontSize: '0.65rem', background: '#e2e8f0', color: 'var(--text-main)', padding: '0.1rem 0.4rem', borderRadius: '4px', fontWeight: 600 }}>
+                            Active Now
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.775rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                        ✉️ {u.email}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      {/* Role Selector (Promote / Demote) */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>Role:</span>
+                        <select
+                          value={u.role}
+                          onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                          style={{
+                            fontSize: '0.8rem',
+                            padding: '0.35rem 0.65rem',
+                            color: roleBadgeColor,
+                            fontWeight: 700,
+                            borderColor: roleBadgeColor,
+                            background: '#ffffff',
+                            borderRadius: 'var(--radius-pill)'
+                          }}
+                        >
+                          <option value="admin">Admin (Owner - Full Access)</option>
+                          <option value="caller">Caller (Telecaller - Leads & Cadence)</option>
+                          <option value="technician">Technician (Site Visits Only)</option>
+                        </select>
+                      </div>
+
+                      {users.length > 1 && (
+                        <button
+                          onClick={() => handleDeleteMember(u.id)}
+                          style={{ background: '#fee2e2', color: '#b91c1c', padding: '0.35rem 0.5rem', borderRadius: 'var(--radius-sm)' }}
+                          title="Remove user account"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
-                Background Auto-Sync
-              </label>
-              <button 
-                onClick={() => setAutoSyncEnabled(!autoSyncEnabled)}
-                className={autoSyncEnabled ? 'btn-primary' : 'btn-secondary'}
-                style={{ width: '100%', justifyContent: 'center' }}
-              >
-                {autoSyncEnabled ? '✓ Auto-Sync Active' : 'Auto-Sync Paused'}
-              </button>
-            </div>
+            {/* Add New Team Member Form */}
+            <form onSubmit={handleCreateMember} style={{
+              background: '#f8fafc',
+              padding: '1rem',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px dashed var(--border-color)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem'
+            }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                + Add New Team Account
+              </span>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.6rem' }}>
+                <input 
+                  type="text" 
+                  placeholder="Full Name (e.g. Ramesh Patel)"
+                  value={newMemberName}
+                  onChange={(e) => setNewMemberName(e.target.value)}
+                  style={{ fontSize: '0.8rem' }}
+                />
+
+                <input 
+                  type="email" 
+                  placeholder="Email (e.g. ramesh@solarbunker.com)"
+                  value={newMemberEmail}
+                  onChange={(e) => setNewMemberEmail(e.target.value)}
+                  style={{ fontSize: '0.8rem' }}
+                />
+
+                <input 
+                  type="password" 
+                  placeholder="Password (optional, min 6 chars)"
+                  value={newMemberPassword}
+                  onChange={(e) => setNewMemberPassword(e.target.value)}
+                  style={{ fontSize: '0.8rem' }}
+                />
+
+                <select 
+                  value={newMemberRole}
+                  onChange={(e) => setNewMemberRole(e.target.value)}
+                  style={{ fontSize: '0.8rem' }}
+                >
+                  <option value="caller">Caller (Telecaller)</option>
+                  <option value="technician">Technician (Site Visits)</option>
+                  <option value="admin">Admin (Business Owner)</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button type="submit" className="btn-primary" style={{ fontSize: '0.775rem', padding: '0.35rem 0.85rem' }}>
+                  <Plus size={14} /> Create Account
+                </button>
+              </div>
+            </form>
           </div>
 
-          {/* Section 3: Inbound Webhook & Google Apps Script Endpoint */}
-          <div style={{ background: 'var(--bg-input)', padding: '1.25rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
-            <h3 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Key size={16} color="var(--accent-teal)" /> Inbound Webhook Credentials (Google Apps Script / AI Agent)
+          {/* SECTION 2: WEBHOOK CREDENTIALS (GOOGLE APPS SCRIPT TOOL) */}
+          <div style={{ 
+            background: '#ffffff', 
+            padding: '1.25rem', 
+            borderRadius: 'var(--radius-md)', 
+            border: '1px solid var(--border-color)',
+            boxShadow: 'var(--shadow-card)'
+          }}>
+            <h3 style={{ fontSize: '0.95rem', color: 'var(--text-main)', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 700 }}>
+              <Key size={16} color="var(--accent-teal)" /> Inbound Webhook Credentials (Google Apps Script Tool)
             </h3>
-            <p style={{ fontSize: '0.775rem', color: 'var(--text-muted)', marginBottom: '0.8rem' }}>
-              Use these endpoint credentials in your Google Apps Script or external automation tools to securely post leads with automated deduplication.
+            <p style={{ fontSize: '0.775rem', color: 'var(--text-muted)', marginBottom: '0.85rem' }}>
+              Your Google Apps Script tool on Google Sheets pushes incoming leads directly into this endpoint.
             </p>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
               <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>CRM Webhook Endpoint URL</label>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>CRM Webhook Endpoint URL</label>
                 <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.2rem' }}>
                   <input 
                     type="text" 
                     readOnly 
                     value={settings.webhookUrl || `http://localhost:3001/api/webhooks/leads`} 
-                    style={{ flex: 1, fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--accent-teal)' }}
+                    style={{ flex: 1, fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--accent-teal)', background: '#f8fafc' }}
                   />
-                  <button onClick={handleCopyWebhook} className="btn-secondary" style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}>
-                    {copiedWebhook ? <Check size={14} /> : <Copy size={14} />} {copiedWebhook ? 'Copied' : 'Copy'}
+                  <button onClick={handleCopyWebhook} className="btn-secondary" style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem' }}>
+                    {copiedWebhook ? <Check size={14} color="#059669" /> : <Copy size={14} />} {copiedWebhook ? 'Copied' : 'Copy'}
                   </button>
                 </div>
               </div>
 
               <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>CRM API Key Header (X-CRM-API-KEY)</label>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>CRM API Key Header (X-CRM-API-KEY)</label>
                 <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.2rem' }}>
                   <input 
                     type="password" 
                     readOnly 
                     value="••••••••••••••••••••••••••••••••" 
-                    style={{ flex: 1, fontFamily: 'monospace', fontSize: '0.8rem', color: '#fff', letterSpacing: '2px' }}
+                    style={{ flex: 1, fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-main)', letterSpacing: '2px', background: '#f8fafc' }}
                   />
-                  <span style={{ fontSize: '0.75rem', color: '#10b981', display: 'flex', alignItems: 'center', padding: '0 0.5rem' }}>
-                    ✓ Active in Backend
-                  </span>
+                  <button onClick={handleCopyKey} className="btn-secondary" style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem' }}>
+                    {copiedKey ? <Check size={14} color="#059669" /> : <Copy size={14} />} {copiedKey ? 'Copied' : 'Copy Key'}
+                  </button>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Section 4: Database Backup & Maintenance */}
-          <div style={{ borderTop: '1px solid var(--border-color)', pt: '1rem', marginTop: '0.5rem' }}>
-            <h3 style={{ fontSize: '0.9rem', color: '#fff', marginBottom: '0.75rem' }}>
-              Database Maintenance
+          {/* SECTION 3: DATABASE BACKUP & MAINTENANCE */}
+          <div style={{ 
+            background: '#ffffff', 
+            padding: '1.25rem', 
+            borderRadius: 'var(--radius-md)', 
+            border: '1px solid var(--border-color)',
+            boxShadow: 'var(--shadow-card)'
+          }}>
+            <h3 style={{ fontSize: '0.9rem', color: 'var(--text-main)', marginBottom: '0.75rem', fontWeight: 700 }}>
+              Database Maintenance & Backups
             </h3>
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
               <button onClick={handleExportJSON} className="btn-secondary" style={{ fontSize: '0.8rem' }}>
                 <Download size={14} /> Export CRM Backup (JSON)
               </button>
 
-              <button onClick={handleClearDatabase} className="btn-secondary" style={{ fontSize: '0.8rem', color: 'var(--accent-rose)' }}>
+              <button onClick={handleClearDatabase} className="btn-secondary" style={{ fontSize: '0.8rem', color: '#b91c1c', borderColor: '#fecaca' }}>
                 <Trash2 size={14} /> Clear CRM Database
               </button>
             </div>
@@ -247,17 +428,17 @@ export const SettingsModal = ({ onClose, onRefreshLeads }) => {
 
         {/* Footer */}
         <div style={{
-          padding: '1rem 1.5rem',
+          padding: '1rem 1.75rem',
           borderTop: '1px solid var(--border-color)',
-          background: 'var(--bg-card)',
+          background: '#ffffff',
           display: 'flex',
           justifyContent: 'flex-end',
           gap: '0.75rem'
         }}>
-          <button onClick={onClose} className="btn-secondary">Cancel</button>
+          <button onClick={onClose} className="btn-secondary">Close</button>
           <button onClick={handleSave} className="btn-primary">
             {isSaved ? <Check size={16} /> : <Save size={16} />}
-            {isSaved ? 'Saved Settings!' : 'Save Settings'}
+            {isSaved ? 'Saved!' : 'Save Settings'}
           </button>
         </div>
 
@@ -265,3 +446,5 @@ export const SettingsModal = ({ onClose, onRefreshLeads }) => {
     </div>
   );
 };
+
+export default SettingsModal;

@@ -5,7 +5,8 @@ dotenv.config();
 
 const cleanEnv = (val) => val ? String(val).trim().replace(/^["']|["']$/g, '') : null;
 
-const SUPABASE_URL = cleanEnv(process.env.SUPABASE_URL) || 'https://muqrumruisowcvllxaeo.supabase.co';
+const rawUrl = cleanEnv(process.env.SUPABASE_URL) || 'https://muqrumruisowcvllxaeo.supabase.co';
+const SUPABASE_URL = rawUrl.replace(/\/+$/, '');
 
 const rawKeyCandidates = [
   cleanEnv(process.env.SUPABASE_SECRET_KEY),
@@ -13,8 +14,8 @@ const rawKeyCandidates = [
   cleanEnv(process.env.SUPABASE_KEY),
   cleanEnv(process.env.SUPABASE_ANON_KEY),
   cleanEnv(process.env.SUPABASE_PUBLISHABLE_KEY),
-  'sb_publishable_pgqRGZk56B1CARqRIf75UA_gAQGXK3w',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im11cXJ1bXJ1aXNvd2N2bGx4YWVvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0NTI0MDAsImV4cCI6MjEwNzAyODQwMH0.MgNLazO5Ht9yuJ_6SsnfFQVt7HKTY5B81ejGAF2QHZY'
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im11cXJ1bXJ1aXNvd2N2bGx4YWVvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0NTI0MDAsImV4cCI6MjEwNzAyODQwMH0.MgNLazO5Ht9yuJ_6SsnfFQVt7HKTY5B81ejGAF2QHZY',
+  'sb_publishable_pgqRGZk56B1CARqRIf75UA_gAQGXK3w'
 ].filter(k => k && k.length > 10 && !k.includes('your_') && !k.includes('placeholder'));
 
 const clientPool = rawKeyCandidates.map(key => createClient(SUPABASE_URL, key, { auth: { persistSession: false } }));
@@ -29,17 +30,15 @@ export async function executeSupabase(operation) {
     const client = clientPool[candidateIdx];
     try {
       const result = await operation(client);
-      if (result && result.error && (result.error.message?.includes('API key') || result.error.message?.includes('JWT') || result.error.code === 'PGRST301')) {
+      if (result && result.error) {
+        lastError = result.error;
         continue;
       }
       activeClientIndex = candidateIdx;
       return result;
     } catch (err) {
       lastError = err;
-      if (err.message && (err.message.includes('API key') || err.message.includes('JWT') || err.message.includes('401'))) {
-        continue;
-      }
-      throw err;
+      continue;
     }
   }
   throw lastError || new Error('All Supabase key candidates failed');
@@ -143,6 +142,13 @@ export function formatLead(row) {
     meetingDate: row.meeting_date,
     meetingTimeSlot: row.meeting_time_slot,
     meetingNotes: row.meeting_notes || '',
+    siteVisitStatus: row.site_visit_status || extraFields.siteVisitStatus || 'Pending',
+    siteVisitNotes: row.site_visit_notes || extraFields.siteVisitNotes || '',
+    siteVisitedAt: row.site_visited_at || extraFields.siteVisitedAt || null,
+    assignedTechnicianId: row.assigned_technician_id || extraFields.assignedTechnicianId || null,
+    assignedTechnicianName: row.assigned_technician_name || extraFields.assignedTechnicianName || null,
+    assignedTechnicianEmail: row.assigned_technician_email || extraFields.assignedTechnicianEmail || null,
+    followUpSequence: row.follow_up_sequence || extraFields.followUpSequence || [],
     metaAdCampaign: row.campaign_name || row.source_sheet || 'Meta Lead Ads',
     campaignId: row.campaign_id,
     sourceSheet: row.source_sheet,
@@ -179,6 +185,14 @@ export async function getLeads(filters = {}) {
     }
     if (filters.campaign && filters.campaign !== 'ALL') {
       query = query.or(`campaign_name.eq.${filters.campaign},source_sheet.eq.${filters.campaign}`);
+    }
+    // Technician Assignment Scope: strictly restricted to assigned consultations/site visits
+    if (filters.technician_user_id || filters.technician_email) {
+      query = query.eq('meeting_booked', true);
+      const techOrs = [];
+      if (filters.technician_user_id) techOrs.push(`assigned_technician_id.eq.${filters.technician_user_id}`);
+      if (filters.technician_email) techOrs.push(`assigned_technician_email.eq.${filters.technician_email}`);
+      query = query.or(techOrs.join(','));
     }
 
     return await query;
@@ -486,6 +500,154 @@ export async function clearAllDatabase() {
   return true;
 }
 
+// ─── USER & ROLE MANAGEMENT (AUTHENTICATED & PERSISTED) ───
+
+export async function getUserProfile(userId) {
+  if (!userId) return null;
+  const result = await executeSupabase(async (client) => {
+    return await client
+      .from('user_profiles')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+  });
+  if (result.error) {
+    console.error(`[Supabase] Error fetching profile for ${userId}:`, result.error);
+    return null;
+  }
+  return result.data || null;
+}
+
+export async function getUserProfileByEmail(email) {
+  if (!email) return null;
+  const clean = String(email).toLowerCase().trim();
+  const result = await executeSupabase(async (client) => {
+    return await client
+      .from('user_profiles')
+      .select('*')
+      .eq('email', clean)
+      .maybeSingle();
+  });
+  if (result.error) {
+    console.error(`[Supabase] Error fetching profile for email ${email}:`, result.error);
+    return null;
+  }
+  return result.data || null;
+}
+
+export async function getAllUserProfiles() {
+  const result = await executeSupabase(async (client) => {
+    return await client
+      .from('user_profiles')
+      .select('id, user_id, email, name, role, created_at, updated_at')
+      .order('created_at', { ascending: true });
+  });
+  if (result.error) {
+    console.error('[Supabase] Error fetching user profiles:', result.error);
+    return [];
+  }
+  return (result.data || []).map(p => ({
+    id: p.user_id,
+    profileId: p.id,
+    email: p.email,
+    name: p.name,
+    role: p.role,
+    createdAt: p.created_at,
+    updatedAt: p.updated_at
+  }));
+}
+
+export async function getAdminCount() {
+  const result = await executeSupabase(async (client) => {
+    return await client
+      .from('user_profiles')
+      .select('*', { count: 'exact', head: true })
+      .eq('role', 'admin');
+  });
+  if (result.error) {
+    console.error('[Supabase] Error counting admins:', result.error);
+    return 0;
+  }
+  return result.count || 0;
+}
+
+export async function createCrmUser({ email, password, name, role }) {
+  const cleanEmail = String(email || '').toLowerCase().trim();
+  const cleanName = String(name || '').trim();
+  const validRole = ['admin', 'caller', 'technician'].includes(role) ? role : 'caller';
+
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    throw new Error('A valid email address is required.');
+  }
+  if (!password || password.length < 6) {
+    throw new Error('Password must be at least 6 characters.');
+  }
+
+  const result = await executeSupabase(async (client) => {
+    return await client.rpc('create_or_update_crm_user', {
+      p_email: cleanEmail,
+      p_password: password,
+      p_name: cleanName || cleanEmail.split('@')[0],
+      p_role: validRole
+    });
+  });
+
+  if (result.error) {
+    console.error('[Supabase] Error creating CRM user:', result.error);
+    throw result.error;
+  }
+
+  return result.data;
+}
+
+export async function updateUserRole(userId, newRole) {
+  if (!['admin', 'caller', 'technician'].includes(newRole)) {
+    throw new Error(`Invalid role: ${newRole}`);
+  }
+
+  // Lockout prevention: if demoting an admin, ensure at least one other admin exists
+  const existing = await getUserProfile(userId);
+  if (existing?.role === 'admin' && newRole !== 'admin') {
+    const adminCount = await getAdminCount();
+    if (adminCount <= 1) {
+      throw new Error('Cannot demote the sole administrator account to prevent lockout.');
+    }
+  }
+
+  const result = await executeSupabase(async (client) => {
+    return await client
+      .from('user_profiles')
+      .update({ role: newRole, updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .select()
+      .single();
+  });
+
+  if (result.error) {
+    console.error(`[Supabase] Error updating role for ${userId}:`, result.error);
+    throw result.error;
+  }
+
+  return result.data;
+}
+
+export async function deleteCrmUser(userId, force = false) {
+  const result = await executeSupabase(async (client) => {
+    return await client.rpc('delete_crm_user', { p_user_id: userId, p_force: force });
+  });
+
+  if (result.error) {
+    console.error(`[Supabase] Error deleting user ${userId}:`, result.error);
+    throw result.error;
+  }
+
+  if (result.data && result.data.success === false) {
+    throw new Error(result.data.error || 'Failed to delete user');
+  }
+
+  return result.data;
+}
+
 export default {
   isSupabaseConfigured,
   getLeads,
@@ -502,5 +664,13 @@ export default {
   normalizeElectricityBill,
   formatLead,
   deleteLeadById,
-  clearAllDatabase
+  clearAllDatabase,
+  getUserProfile,
+  getUserProfileByEmail,
+  getAllUserProfiles,
+  getAdminCount,
+  createCrmUser,
+  updateUserRole,
+  deleteCrmUser
 };
+

@@ -3,22 +3,62 @@ import { Header } from './components/Header';
 import { Dashboard } from './components/Dashboard';
 import { LeadPipeline } from './components/LeadPipeline';
 import { MeetingsView } from './components/MeetingsView';
+import { RemindersView } from './components/RemindersView';
 import { WebhookHub } from './components/WebhookHub';
 import { LeadDetailModal } from './components/LeadDetailModal';
 import { SettingsModal } from './components/SettingsModal';
 import { AddLeadModal } from './components/AddLeadModal';
 import { getStoredLeads, getSettings, fetchLeadsFromBackend, fetchBackendHealth } from './services/leadStorage';
-import { syncFromGoogleSheet } from './services/sheetSync';
+import { getCurrentUser, refreshSession } from './services/authService';
+import { LoginModal } from './components/LoginModal';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [currentUser, setCurrentUser] = useState(getCurrentUser());
+  const [isVerifyingSession, setIsVerifyingSession] = useState(true);
+  const [activeTab, setActiveTab] = useState(
+    getCurrentUser()?.role === 'technician' ? 'meetings' : 
+    getCurrentUser()?.role === 'caller' ? 'pipeline' : 'dashboard'
+  );
   const [leads, setLeads] = useState(getStoredLeads());
   const [selectedLead, setSelectedLead] = useState(null);
+  const [leadModalTab, setLeadModalTab] = useState('source');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAddLeadOpen, setIsAddLeadOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [backendError, setBackendError] = useState(null);
+
+  // Verify and hydrate session on application mount
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        const u = await refreshSession();
+        setCurrentUser(u);
+      } catch (err) {
+        console.error('[Session Check] Failed:', err);
+      } finally {
+        setIsVerifyingSession(false);
+      }
+    };
+    initSession();
+  }, []);
+
+  // Listen for user role switches or sign outs
+  useEffect(() => {
+    const handleAuthChange = () => {
+      const u = getCurrentUser();
+      setCurrentUser(u);
+      if (u?.role === 'technician') {
+        setActiveTab('meetings');
+        setIsSettingsOpen(false);
+      } else if (u?.role === 'caller' && (activeTab === 'dashboard' || activeTab === 'webhook')) {
+        setActiveTab('pipeline');
+        setIsSettingsOpen(false);
+      }
+    };
+    window.addEventListener('solar_bunker_auth_changed', handleAuthChange);
+    return () => window.removeEventListener('solar_bunker_auth_changed', handleAuthChange);
+  }, [activeTab]);
 
   // Refresh leads from storage & backend
   const refreshLeads = async () => {
@@ -54,17 +94,35 @@ export function App() {
     return () => window.removeEventListener('solar_bunker_leads_updated', handleLeadsUpdated);
   }, []);
 
-  // Background Google Sheet Auto-Sync Interval
-  useEffect(() => {
-    const settings = getSettings();
-    if (settings.autoSyncEnabled && settings.googleSheetUrl) {
-      const intervalMs = (settings.syncIntervalMinutes || 1) * 60 * 1000;
-      const timer = setInterval(() => {
-        syncFromGoogleSheet();
-      }, intervalMs);
-      return () => clearInterval(timer);
-    }
-  }, []);
+
+
+  // Count pending follow-up leads for the header badge
+  const pendingRemindersCount = leads.filter(l => {
+    if (l.pickupStatus === 'Picked Up') return false;
+    if (l.qualification === 'Unqualified') return false;
+    if (l.meetingBooked) return false;
+    const seq = l.followUpSequence || [];
+    return seq.filter(s => s.completed).length < 5;
+  }).length;
+
+  const handleOpenLeadModal = (lead, defaultTab = 'source') => {
+    setSelectedLead(lead);
+    setLeadModalTab(defaultTab);
+  };
+
+  const role = currentUser?.role || 'admin';
+
+  if (!currentUser) {
+    return (
+      <LoginModal 
+        onLoginSuccess={(u) => {
+          setCurrentUser(u);
+          setActiveTab(u.role === 'technician' ? 'meetings' : u.role === 'caller' ? 'pipeline' : 'dashboard');
+          refreshLeads();
+        }} 
+      />
+    );
+  }
 
   return (
     <div className="app-container">
@@ -72,9 +130,12 @@ export function App() {
       <Header 
         activeTab={activeTab} 
         setActiveTab={setActiveTab}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSettings={() => {
+          if (role === 'admin') setIsSettingsOpen(true);
+        }}
         onOpenNewLeadModal={() => setIsAddLeadOpen(true)}
         leadsCount={leads.length}
+        pendingRemindersCount={pendingRemindersCount}
       />
 
       {/* Backend Status Notice */}
@@ -112,32 +173,45 @@ export function App() {
 
       {/* Main Container View */}
       <main className="main-content">
-        {activeTab === 'dashboard' && (
+        {/* Dashboard: Admin Only */}
+        {activeTab === 'dashboard' && role === 'admin' && (
           <Dashboard 
             leads={leads} 
-            onSelectLead={(lead) => setSelectedLead(lead)}
+            onSelectLead={(lead) => handleOpenLeadModal(lead, 'source')}
             setActiveTab={setActiveTab}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onOpenAddLead={() => setIsAddLeadOpen(true)}
           />
         )}
 
-        {activeTab === 'pipeline' && (
+        {/* Pipeline: Admin & Caller */}
+        {activeTab === 'pipeline' && role !== 'technician' && (
           <LeadPipeline 
             leads={leads} 
-            onSelectLead={(lead) => setSelectedLead(lead)}
+            onSelectLead={(lead) => handleOpenLeadModal(lead, 'source')}
             onRefreshLeads={refreshLeads}
           />
         )}
 
+        {/* Scheduled Meetings: Admin, Caller & Technician */}
         {activeTab === 'meetings' && (
           <MeetingsView 
             leads={leads} 
-            onSelectLead={(lead) => setSelectedLead(lead)}
+            onSelectLead={(lead) => handleOpenLeadModal(lead, 'meeting')}
+            onRefreshLeads={refreshLeads}
           />
         )}
 
-        {activeTab === 'webhook' && (
+        {/* Reminders: Admin & Caller */}
+        {activeTab === 'reminders' && role !== 'technician' && (
+          <RemindersView 
+            leads={leads} 
+            onSelectLead={(lead, tab) => handleOpenLeadModal(lead, tab || 'call')}
+          />
+        )}
+
+        {/* Webhook Hub: Admin Only */}
+        {activeTab === 'webhook' && role === 'admin' && (
           <WebhookHub 
             leads={leads} 
             onRefreshLeads={refreshLeads}
@@ -149,19 +223,21 @@ export function App() {
       {selectedLead && (
         <LeadDetailModal 
           lead={selectedLead}
+          initialTab={leadModalTab}
           onClose={() => setSelectedLead(null)}
           onRefresh={refreshLeads}
         />
       )}
 
-      {isSettingsOpen && (
+      {/* Settings Modal: Admin Only */}
+      {isSettingsOpen && role === 'admin' && (
         <SettingsModal 
           onClose={() => setIsSettingsOpen(false)}
           onRefreshLeads={refreshLeads}
         />
       )}
 
-      {isAddLeadOpen && (
+      {isAddLeadOpen && role !== 'technician' && (
         <AddLeadModal 
           onClose={() => setIsAddLeadOpen(false)}
           onRefreshLeads={refreshLeads}

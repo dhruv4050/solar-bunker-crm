@@ -10,6 +10,7 @@ import {
   isSupabaseConfigured,
   normalizeElectricityBill 
 } from '../db.js';
+import { authenticateUser, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -31,10 +32,49 @@ function extractField(obj, aliases, defaultVal = null) {
   return defaultVal;
 }
 
-// Webhook Authentication Middleware
+import crypto from 'crypto';
+
+// Webhook Authentication Middleware & Rate Limiting
 const DEFAULT_CRM_API_KEY = 'sb_live_685682910eb67eb82ea6e31c6adc093209c5cbd5e07c32b2';
 
+// In-memory rate limiting map for webhook calls (max 120 req/min per IP)
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const MAX_REQUESTS_PER_WINDOW = 120;
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+  if (!entry || now - entry.resetTime > RATE_LIMIT_WINDOW_MS) {
+    rateLimitMap.set(ip, { count: 1, resetTime: now });
+    return true;
+  }
+  if (entry.count >= MAX_REQUESTS_PER_WINDOW) {
+    return false;
+  }
+  entry.count += 1;
+  return true;
+}
+
+function safeTimingCompare(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 function authenticateApiKey(req, res, next) {
+  // Apply rate limiting
+  const clientIp = req.ip || req.connection?.remoteAddress || 'unknown';
+  if (!checkRateLimit(clientIp)) {
+    return res.status(429).json({
+      success: false,
+      error: 'Too Many Requests',
+      message: 'Rate limit exceeded for webhook ingestion. Please throttle incoming requests to maximum 120/minute.'
+    });
+  }
+
   const rawIncomingKey = req.get('X-CRM-API-KEY') || req.get('x-crm-api-key') || req.query.api_key;
   const incomingKey = rawIncomingKey ? String(rawIncomingKey).trim().replace(/^["']|["']$/g, '') : null;
   const rawConfiguredKey = process.env.CRM_API_KEY;
@@ -49,7 +89,7 @@ function authenticateApiKey(req, res, next) {
       status: 'unauthorized',
       action: 'rejected',
       response_message: 'Missing X-CRM-API-KEY header',
-      ip: req.ip,
+      ip: clientIp,
       payload: req.body
     });
     return res.status(401).json({
@@ -59,12 +99,14 @@ function authenticateApiKey(req, res, next) {
     });
   }
 
-  if (!validKeys.includes(incomingKey)) {
+  const isValid = validKeys.some(vk => safeTimingCompare(incomingKey, vk));
+
+  if (!isValid) {
     logWebhookEvent({
       status: 'unauthorized',
       action: 'rejected',
       response_message: 'Invalid X-CRM-API-KEY provided',
-      ip: req.ip,
+      ip: clientIp,
       payload: req.body
     });
     return res.status(401).json({
@@ -349,8 +391,8 @@ router.post('/leads', authenticateApiKey, async (req, res) => {
   }
 });
 
-// GET /api/webhooks/logs - Get recent webhook logs
-router.get('/logs', async (req, res) => {
+// GET /api/webhooks/logs - Get recent webhook logs (Admin Only)
+router.get('/logs', authenticateUser, requireRole('admin'), async (req, res) => {
   try {
     const logs = await getWebhookLogs();
     res.json({ success: true, logs });
@@ -359,8 +401,8 @@ router.get('/logs', async (req, res) => {
   }
 });
 
-// POST /api/webhooks/test - Trigger simulated test lead
-router.post('/test', async (req, res) => {
+// POST /api/webhooks/test - Trigger simulated test lead (Admin Only)
+router.post('/test', authenticateUser, requireRole('admin'), async (req, res) => {
   try {
     const testLeadId = `LEAD-TEST-${Math.floor(100000 + Math.random() * 900000)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
     const testPayload = {

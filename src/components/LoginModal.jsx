@@ -124,78 +124,81 @@ export const LoginModal = ({ onLoginSuccess }) => {
   };
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'radial-gradient(ellipse at top, #1e293b 0%, #0f172a 100%)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '1.5rem',
-      zIndex: 9999
-    }}>
-      <div 
-        className="glass-panel animate-fade-in"
-        style={{
-          width: '100%',
-          maxWidth: '440px',
-          background: 'rgba(255, 255, 255, 0.98)',
-          borderRadius: 'var(--radius-lg)',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.45)',
-          border: '1px solid rgba(226, 232, 240, 0.8)',
-          overflow: 'hidden'
-        }}
-      >
-        {/* Brand Banner */}
-        <div style={{
-          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-          padding: '2rem 1.75rem 1.75rem 1.75rem',
-          textAlign: 'center',
-          color: '#ffffff',
-          position: 'relative'
-        }}>
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '52px',
-            height: '52px',
-            borderRadius: '16px',
-            background: mode === 'reset' 
-              ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' 
-              : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
-            boxShadow: '0 10px 15px -3px rgba(245, 158, 11, 0.4)',
-            marginBottom: '1rem'
-          }}>
-            {mode === 'reset' ? (
-              <KeyRound size={28} color="#ffffff" strokeWidth={2.3} />
-            ) : (
-              <SunMedium size={30} color="#ffffff" strokeWidth={2.3} />
-            )}
+    <div className="login-page-bg">
+      <div className="login-card">
+        {/* Top Solar-to-Enervia Accent Line */}
+        <div style={{ height: '3.5px', width: '100%', background: 'linear-gradient(90deg, #f59e0b 0%, #10b981 100%)' }} />
+
+        {/* Brand Banner Header */}
+        <div className="login-card-header">
+          <div style={{ position: 'relative', display: 'inline-block', marginBottom: '1rem' }}>
+            <img 
+              src="/solar-bunker-logo.png" 
+              alt="Solar Bunker Logo" 
+              className="login-logo-glow"
+            />
           </div>
 
-          <h1 style={{
-            fontSize: '1.35rem',
-            fontWeight: 800,
-            margin: 0,
-            letterSpacing: '-0.025em',
-            color: '#ffffff'
-          }}>
-            Solar Bunker CRM
-          </h1>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
+            <h1 style={{
+              fontSize: '1.4rem',
+              fontWeight: 800,
+              margin: 0,
+              letterSpacing: '-0.025em',
+              color: '#ffffff',
+              fontFamily: 'var(--font-heading)'
+            }}>
+              SOLAR BUNKER
+            </h1>
+            <span style={{
+              background: 'rgba(16, 185, 129, 0.18)',
+              color: '#34d399',
+              border: '1px solid rgba(16, 185, 129, 0.35)',
+              fontSize: '0.68rem',
+              fontWeight: 700,
+              padding: '0.18rem 0.55rem',
+              borderRadius: '9999px',
+              letterSpacing: '0.02em',
+              textTransform: 'uppercase'
+            }}>
+              Enervia Innovations
+            </span>
+          </div>
+
           <p style={{
-            fontSize: '0.825rem',
+            fontSize: '0.785rem',
             color: '#94a3b8',
             margin: '0.35rem 0 0 0',
             fontWeight: 500
           }}>
-            {mode === 'login' && 'Production Portal • Authenticated Access'}
-            {mode === 'forgot' && 'Account Recovery • Password Reset'}
-            {mode === 'reset' && 'Secure Session • Update Password'}
+            High-Velocity Solar Sales & Intake CRM
           </p>
+
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.45rem',
+            marginTop: '0.85rem',
+            padding: '0.28rem 0.85rem',
+            background: 'rgba(255, 255, 255, 0.08)',
+            borderRadius: '9999px',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            fontSize: '0.725rem',
+            color: '#cbd5e1',
+            fontWeight: 600
+          }}>
+            <span style={{
+              width: '6px',
+              height: '6px',
+              borderRadius: '50%',
+              background: '#10b981',
+              boxShadow: '0 0 8px #10b981',
+              display: 'inline-block'
+            }} />
+            <span>{mode === 'login' && 'Production Portal • Authenticated Access'}</span>
+            <span>{mode === 'forgot' && 'Account Recovery • Password Reset'}</span>
+            <span>{mode === 'reset' && 'Secure Session • Set New Password'}</span>
+          </div>
         </div>
 
         {/* Form Body */}
@@ -245,13 +248,13 @@ export const LoginModal = ({ onLoginSuccess }) => {
           {mode === 'login' && (
             <form onSubmit={handleLoginSubmit}>
               {/* Email Field */}
-              <div style={{ marginBottom: '1.15rem' }}>
+              <div style={{ marginBottom: '1.25rem' }}>
                 <label style={{
                   display: 'block',
                   fontSize: '0.775rem',
                   fontWeight: 700,
                   color: 'var(--text-main)',
-                  marginBottom: '0.4rem',
+                  marginBottom: '0.45rem',
                   textTransform: 'uppercase',
                   letterSpacing: '0.04em'
                 }}>
@@ -260,7 +263,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
                 <div style={{ position: 'relative' }}>
                   <div style={{
                     position: 'absolute',
-                    left: '0.85rem',
+                    left: '0.95rem',
                     top: '50%',
                     transform: 'translateY(-50%)',
                     color: 'var(--text-muted)',
@@ -268,7 +271,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
                     alignItems: 'center',
                     pointerEvents: 'none'
                   }}>
-                    <Mail size={16} />
+                    <Mail size={17} />
                   </div>
                   <input
                     type="email"
@@ -276,24 +279,15 @@ export const LoginModal = ({ onLoginSuccess }) => {
                     autoComplete="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@company.com"
-                    style={{
-                      width: '100%',
-                      padding: '0.65rem 0.85rem 0.65rem 2.4rem',
-                      fontSize: '0.9rem',
-                      borderRadius: 'var(--radius-sm)',
-                      border: '1px solid var(--border-color)',
-                      background: '#ffffff',
-                      color: 'var(--text-main)',
-                      outline: 'none'
-                    }}
+                    placeholder="admin@solarbunker.com"
+                    className="login-input"
                   />
                 </div>
               </div>
 
               {/* Password Field */}
-              <div style={{ marginBottom: '0.75rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+              <div style={{ marginBottom: '0.85rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
                   <label style={{
                     fontSize: '0.775rem',
                     fontWeight: 700,
@@ -315,10 +309,14 @@ export const LoginModal = ({ onLoginSuccess }) => {
                       border: 'none',
                       color: '#d97706',
                       fontSize: '0.775rem',
-                      fontWeight: 600,
+                      fontWeight: 700,
                       cursor: 'pointer',
-                      padding: 0
+                      padding: 0,
+                      transition: 'color 0.2s ease',
+                      textDecoration: 'none'
                     }}
+                    onMouseEnter={(e) => e.currentTarget.style.color = '#b45309'}
+                    onMouseLeave={(e) => e.currentTarget.style.color = '#d97706'}
                   >
                     Forgot password?
                   </button>
@@ -326,7 +324,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
                 <div style={{ position: 'relative' }}>
                   <div style={{
                     position: 'absolute',
-                    left: '0.85rem',
+                    left: '0.95rem',
                     top: '50%',
                     transform: 'translateY(-50%)',
                     color: 'var(--text-muted)',
@@ -334,7 +332,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
                     alignItems: 'center',
                     pointerEvents: 'none'
                   }}>
-                    <Lock size={16} />
+                    <Lock size={17} />
                   </div>
                   <input
                     type={showPassword ? 'text' : 'password'}
@@ -343,36 +341,27 @@ export const LoginModal = ({ onLoginSuccess }) => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••••••"
-                    style={{
-                      width: '100%',
-                      padding: '0.65rem 2.4rem 0.65rem 2.4rem',
-                      fontSize: '0.9rem',
-                      borderRadius: 'var(--radius-sm)',
-                      border: '1px solid var(--border-color)',
-                      background: '#ffffff',
-                      color: 'var(--text-main)',
-                      outline: 'none'
-                    }}
+                    className="login-input"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     style={{
                       position: 'absolute',
-                      right: '0.75rem',
+                      right: '0.85rem',
                       top: '50%',
                       transform: 'translateY(-50%)',
                       background: 'none',
                       border: 'none',
                       color: 'var(--text-muted)',
                       cursor: 'pointer',
-                      padding: '0.2rem',
+                      padding: '0.25rem',
                       display: 'flex',
                       alignItems: 'center'
                     }}
                     tabIndex={-1}
                   >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                   </button>
                 </div>
               </div>
@@ -381,17 +370,11 @@ export const LoginModal = ({ onLoginSuccess }) => {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="btn-primary"
+                className="login-submit-btn"
                 style={{
-                  width: '100%',
                   marginTop: '1.25rem',
-                  padding: '0.75rem 1rem',
-                  fontSize: '0.925rem',
-                  fontWeight: 700,
-                  justifyContent: 'center',
-                  boxShadow: '0 4px 6px -1px rgba(245, 158, 11, 0.3)',
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                  opacity: isLoading ? 0.8 : 1
+                  opacity: isLoading ? 0.75 : 1,
+                  cursor: isLoading ? 'not-allowed' : 'pointer'
                 }}
               >
                 {isLoading ? (
@@ -399,7 +382,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
                 ) : (
                   <>
                     <span>Sign In to CRM</span>
-                    <ArrowRight size={16} />
+                    <ArrowRight size={17} />
                   </>
                 )}
               </button>
@@ -448,17 +431,8 @@ export const LoginModal = ({ onLoginSuccess }) => {
                     autoComplete="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@company.com"
-                    style={{
-                      width: '100%',
-                      padding: '0.65rem 0.85rem 0.65rem 2.4rem',
-                      fontSize: '0.9rem',
-                      borderRadius: 'var(--radius-sm)',
-                      border: '1px solid var(--border-color)',
-                      background: '#ffffff',
-                      color: 'var(--text-main)',
-                      outline: 'none'
-                    }}
+                    placeholder="admin@solarbunker.com"
+                    className="login-input"
                   />
                 </div>
               </div>
@@ -466,17 +440,11 @@ export const LoginModal = ({ onLoginSuccess }) => {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="btn-primary"
+                className="login-submit-btn"
                 style={{
-                  width: '100%',
-                  padding: '0.75rem 1rem',
-                  fontSize: '0.925rem',
-                  fontWeight: 700,
-                  justifyContent: 'center',
-                  boxShadow: '0 4px 6px -1px rgba(245, 158, 11, 0.3)',
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                  opacity: isLoading ? 0.8 : 1,
-                  marginBottom: '1rem'
+                  marginBottom: '1rem',
+                  opacity: isLoading ? 0.75 : 1,
+                  cursor: isLoading ? 'not-allowed' : 'pointer'
                 }}
               >
                 {isLoading ? (
@@ -484,7 +452,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
                 ) : (
                   <>
                     <span>Send Reset Email</span>
-                    <Mail size={16} />
+                    <Mail size={17} />
                   </>
                 )}
               </button>
@@ -506,12 +474,15 @@ export const LoginModal = ({ onLoginSuccess }) => {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '0.4rem',
+                  gap: '0.45rem',
                   cursor: 'pointer',
-                  padding: '0.4rem'
+                  padding: '0.45rem',
+                  transition: 'color 0.2s ease'
                 }}
+                onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-main)'}
+                onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
               >
-                <ArrowLeft size={15} /> Back to Sign In
+                <ArrowLeft size={16} /> Back to Sign In
               </button>
             </form>
           )}
@@ -519,7 +490,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
           {/* ─── MODE 3: SET NEW PASSWORD (AFTER RECOVERY LINK CLICK) ─── */}
           {mode === 'reset' && (
             <form onSubmit={handleResetSubmit}>
-              <div style={{ marginBottom: '1.15rem' }}>
+              <div style={{ marginBottom: '1.25rem' }}>
                 <p style={{
                   fontSize: '0.85rem',
                   color: 'var(--text-muted)',
@@ -534,7 +505,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
                   fontSize: '0.775rem',
                   fontWeight: 700,
                   color: 'var(--text-main)',
-                  marginBottom: '0.4rem',
+                  marginBottom: '0.45rem',
                   textTransform: 'uppercase',
                   letterSpacing: '0.04em'
                 }}>
@@ -543,7 +514,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
                 <div style={{ position: 'relative' }}>
                   <div style={{
                     position: 'absolute',
-                    left: '0.85rem',
+                    left: '0.95rem',
                     top: '50%',
                     transform: 'translateY(-50%)',
                     color: 'var(--text-muted)',
@@ -551,7 +522,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
                     alignItems: 'center',
                     pointerEvents: 'none'
                   }}>
-                    <Lock size={16} />
+                    <Lock size={17} />
                   </div>
                   <input
                     type={showPassword ? 'text' : 'password'}
@@ -560,36 +531,27 @@ export const LoginModal = ({ onLoginSuccess }) => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••••••"
-                    style={{
-                      width: '100%',
-                      padding: '0.65rem 2.4rem 0.65rem 2.4rem',
-                      fontSize: '0.9rem',
-                      borderRadius: 'var(--radius-sm)',
-                      border: '1px solid var(--border-color)',
-                      background: '#ffffff',
-                      color: 'var(--text-main)',
-                      outline: 'none'
-                    }}
+                    className="login-input"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     style={{
                       position: 'absolute',
-                      right: '0.75rem',
+                      right: '0.85rem',
                       top: '50%',
                       transform: 'translateY(-50%)',
                       background: 'none',
                       border: 'none',
                       color: 'var(--text-muted)',
                       cursor: 'pointer',
-                      padding: '0.2rem',
+                      padding: '0.25rem',
                       display: 'flex',
                       alignItems: 'center'
                     }}
                     tabIndex={-1}
                   >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                   </button>
                 </div>
               </div>
@@ -600,7 +562,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
                   fontSize: '0.775rem',
                   fontWeight: 700,
                   color: 'var(--text-main)',
-                  marginBottom: '0.4rem',
+                  marginBottom: '0.45rem',
                   textTransform: 'uppercase',
                   letterSpacing: '0.04em'
                 }}>
@@ -609,7 +571,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
                 <div style={{ position: 'relative' }}>
                   <div style={{
                     position: 'absolute',
-                    left: '0.85rem',
+                    left: '0.95rem',
                     top: '50%',
                     transform: 'translateY(-50%)',
                     color: 'var(--text-muted)',
@@ -617,7 +579,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
                     alignItems: 'center',
                     pointerEvents: 'none'
                   }}>
-                    <Lock size={16} />
+                    <Lock size={17} />
                   </div>
                   <input
                     type={showPassword ? 'text' : 'password'}
@@ -626,16 +588,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••••••"
-                    style={{
-                      width: '100%',
-                      padding: '0.65rem 0.85rem 0.65rem 2.4rem',
-                      fontSize: '0.9rem',
-                      borderRadius: 'var(--radius-sm)',
-                      border: '1px solid var(--border-color)',
-                      background: '#ffffff',
-                      color: 'var(--text-main)',
-                      outline: 'none'
-                    }}
+                    className="login-input"
                   />
                 </div>
               </div>
@@ -643,17 +596,11 @@ export const LoginModal = ({ onLoginSuccess }) => {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="btn-primary"
+                className="login-submit-btn"
                 style={{
-                  width: '100%',
-                  padding: '0.75rem 1rem',
-                  fontSize: '0.925rem',
-                  fontWeight: 700,
-                  justifyContent: 'center',
-                  boxShadow: '0 4px 6px -1px rgba(245, 158, 11, 0.3)',
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                  opacity: isLoading ? 0.8 : 1,
-                  marginBottom: '1rem'
+                  marginBottom: '1rem',
+                  opacity: isLoading ? 0.75 : 1,
+                  cursor: isLoading ? 'not-allowed' : 'pointer'
                 }}
               >
                 {isLoading ? (
@@ -661,7 +608,7 @@ export const LoginModal = ({ onLoginSuccess }) => {
                 ) : (
                   <>
                     <span>Set New Password</span>
-                    <KeyRound size={16} />
+                    <KeyRound size={17} />
                   </>
                 )}
               </button>
@@ -683,31 +630,51 @@ export const LoginModal = ({ onLoginSuccess }) => {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '0.4rem',
+                  gap: '0.45rem',
                   cursor: 'pointer',
-                  padding: '0.4rem'
+                  padding: '0.45rem',
+                  transition: 'color 0.2s ease'
                 }}
+                onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-main)'}
+                onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
               >
-                <ArrowLeft size={15} /> Back to Sign In
+                <ArrowLeft size={16} /> Back to Sign In
               </button>
             </form>
           )}
 
         </div>
 
-        {/* First Admin Notice Footer */}
+        {/* Enterprise Security Footer */}
         <div style={{
           background: '#f8fafc',
-          borderTop: '1px solid var(--border-color)',
-          padding: '0.85rem 1.25rem',
-          fontSize: '0.725rem',
+          borderTop: '1px solid #e2e8f0',
+          padding: '0.9rem 1.25rem 0.65rem 1.25rem',
+          fontSize: '0.75rem',
           color: 'var(--text-muted)',
           textAlign: 'center',
           lineHeight: 1.4
         }}>
-          <Shield size={12} style={{ display: 'inline', verticalAlign: '-1px', marginRight: '4px' }} />
-          <span>Role-Based Access Protected. First administrator setup via CLI: </span>
-          <code style={{ background: '#e2e8f0', padding: '0.1rem 0.3rem', borderRadius: '3px', fontWeight: 600 }}>npm run admin:bootstrap</code>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.55rem',
+            flexWrap: 'wrap',
+            marginBottom: '0.35rem'
+          }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', color: '#0f172a', fontWeight: 600 }}>
+              <Shield size={13} color="#10b981" />
+              <span>Enterprise RBAC Active</span>
+            </div>
+            <span style={{ color: '#cbd5e1' }}>•</span>
+            <span>Supabase Cloud PostgreSQL</span>
+            <span style={{ color: '#cbd5e1' }}>•</span>
+            <span>256-Bit SSL</span>
+          </div>
+          <div style={{ fontSize: '0.675rem', color: '#94a3b8' }}>
+            Administrator Setup CLI: <code style={{ background: '#e2e8f0', padding: '0.1rem 0.35rem', borderRadius: '4px', fontWeight: 600, color: '#334155' }}>npm run admin:bootstrap</code>
+          </div>
         </div>
       </div>
     </div>

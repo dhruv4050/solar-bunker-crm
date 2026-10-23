@@ -165,6 +165,12 @@ export async function refreshSession() {
     return null;
   }
 
+  // If this is a password recovery session, let the user complete password reset first
+  const isRecovery = window.location.hash?.includes('type=recovery') || window.location.search?.includes('type=recovery');
+  if (isRecovery) {
+    return null;
+  }
+
   try {
     const res = await fetch('/api/auth/me', {
       headers: {
@@ -185,6 +191,50 @@ export async function refreshSession() {
     console.error('[Auth] Failed to verify session:', err);
     return getCurrentUser();
   }
+}
+
+/**
+ * Request password recovery email using Supabase Auth.
+ * Redirects back to production domain with recovery tokens.
+ */
+export async function requestPasswordReset(email) {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    throw new Error('Please enter a valid email address.');
+  }
+
+  const sb = await getSupabase();
+  const origin = window.location.origin || 'https://solar-bunker-crm.onrender.com';
+  
+  const { data, error } = await sb.auth.resetPasswordForEmail(cleanEmail, {
+    redirectTo: `${origin}/`
+  });
+
+  if (error) {
+    throw new Error(error.message || 'Failed to send password reset email.');
+  }
+
+  return { success: true, message: 'Password reset link sent successfully.' };
+}
+
+/**
+ * Updates user password during an active recovery session.
+ */
+export async function updateUserPassword(newPassword) {
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error('Password must be at least 6 characters.');
+  }
+
+  const sb = await getSupabase();
+  const { data, error } = await sb.auth.updateUser({
+    password: newPassword
+  });
+
+  if (error) {
+    throw new Error(error.message || 'Failed to update password.');
+  }
+
+  return data;
 }
 
 // ─── TEAM ACCOUNTS MANAGEMENT (ADMIN ONLY VIA BACKEND) ───

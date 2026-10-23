@@ -9,8 +9,8 @@ const rawUrl = cleanEnv(process.env.SUPABASE_URL) || 'https://muqrumruisowcvllxa
 const SUPABASE_URL = rawUrl.replace(/\/+$/, '');
 
 const rawKeyCandidates = [
-  cleanEnv(process.env.SUPABASE_SECRET_KEY),
   cleanEnv(process.env.SUPABASE_SERVICE_ROLE_KEY),
+  cleanEnv(process.env.SUPABASE_SECRET_KEY),
   cleanEnv(process.env.SUPABASE_KEY),
   cleanEnv(process.env.SUPABASE_ANON_KEY),
   cleanEnv(process.env.SUPABASE_PUBLISHABLE_KEY),
@@ -42,6 +42,42 @@ export async function executeSupabase(operation) {
     }
   }
   throw lastError || new Error('All Supabase key candidates failed');
+}
+
+/**
+ * Cryptographically verifies a Supabase JWT access token using candidate rotation.
+ * If one key candidate has an API key error, it transparently tries other candidates.
+ */
+export async function verifyAuthToken(token) {
+  let lastError = null;
+  for (let i = 0; i < clientPool.length; i++) {
+    const candidateIdx = (activeClientIndex + i) % clientPool.length;
+    const client = clientPool[candidateIdx];
+    try {
+      const { data, error } = await client.auth.getUser(token);
+      if (error) {
+        // If error is an API key error, try next candidate
+        if (
+          error.message?.includes('API key') ||
+          error.message?.includes('apiKey') ||
+          (error.status === 401 && !error.message?.includes('token') && !error.message?.includes('expired') && !error.message?.includes('invalid JWT') && !error.message?.includes('signature'))
+        ) {
+          lastError = error;
+          continue;
+        }
+        // Legitimate user auth error (e.g. invalid/expired JWT)
+        return { user: null, error };
+      }
+      if (data?.user) {
+        activeClientIndex = candidateIdx;
+        return { user: data.user, error: null };
+      }
+    } catch (err) {
+      lastError = err;
+      continue;
+    }
+  }
+  return { user: null, error: lastError || new Error('Authentication token verification failed') };
 }
 
 export const supabase = new Proxy({}, {

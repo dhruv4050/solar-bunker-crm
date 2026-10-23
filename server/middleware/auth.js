@@ -1,4 +1,4 @@
-import { supabase, getUserProfile } from '../db.js';
+import { supabase, getUserProfile, verifyAuthToken } from '../db.js';
 
 /**
  * Middleware: Cryptographically verify user's Supabase JWT access token
@@ -24,8 +24,8 @@ export async function authenticateUser(req, res, next) {
   }
 
   try {
-    // Cryptographically verify token with Supabase Auth
-    const { data: { user }, error } = await supabase.auth.getUser(token);
+    // Cryptographically verify token with Supabase Auth (with multi-candidate resilience)
+    const { user, error } = await verifyAuthToken(token);
     
     if (error || !user) {
       return res.status(401).json({

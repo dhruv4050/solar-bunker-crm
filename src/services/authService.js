@@ -329,6 +329,33 @@ export async function deleteUser(userId) {
   return true;
 }
 
+export async function changeAdminPassword({ currentPassword, newPassword, confirmPassword }) {
+  const token = await getAuthToken();
+  if (!token) {
+    throw new Error('Authentication required. Please sign in again.');
+  }
+
+  const res = await fetch('/api/auth/change-password', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      currentPassword,
+      newPassword,
+      confirmPassword
+    })
+  });
+
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.message || data.error || 'Failed to update password.');
+  }
+
+  return data;
+}
+
 export default {
   getSupabase,
   getSupabaseSync,
@@ -341,5 +368,6 @@ export default {
   getTechnicians,
   addUser,
   updateUserRole,
-  deleteUser
+  deleteUser,
+  changeAdminPassword
 };

@@ -684,6 +684,68 @@ export async function deleteCrmUser(userId, force = false) {
   return result.data;
 }
 
+export async function changeAdminPassword({ email, currentPassword, newPassword, userId }) {
+  if (!email || !currentPassword || !newPassword) {
+    const err = new Error('Email, current password, and new password are required.');
+    err.status = 400;
+    throw err;
+  }
+
+  if (newPassword.length < 8) {
+    const err = new Error('New password must be at least 8 characters in length.');
+    err.status = 400;
+    throw err;
+  }
+
+  if (currentPassword === newPassword) {
+    const err = new Error('New password must be different from current password.');
+    err.status = 400;
+    throw err;
+  }
+
+  // Cryptographically verify current password against Supabase Auth
+  const anonKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im11cXJ1bXJ1aXNvd2N2bGx4YWVvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0NTI0MDAsImV4cCI6MjEwNzAyODQwMH0.MgNLazO5Ht9yuJ_6SsnfFQVt7HKTY5B81ejGAF2QHZY';
+  const authClient = createClient(SUPABASE_URL, anonKey);
+  const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
+    email,
+    password: currentPassword
+  });
+
+  if (authError || !authData?.user) {
+    const err = new Error('Incorrect current password. Please verify and try again.');
+    err.status = 400;
+    throw err;
+  }
+
+  if (userId && authData.user.id !== userId) {
+    const err = new Error('Authenticated user identity mismatch.');
+    err.status = 403;
+    throw err;
+  }
+
+  // Update password via the verified session
+  const { error: updateError } = await authClient.auth.updateUser({
+    password: newPassword
+  });
+
+  if (updateError) {
+    console.warn('[Supabase Auth] authClient.updateUser failed, using RPC fallback:', updateError.message);
+    const result = await executeSupabase(async (client) => {
+      return await client.rpc('create_or_update_crm_user', {
+        p_email: email,
+        p_password: newPassword,
+        p_name: authData.user.user_metadata?.name || email.split('@')[0],
+        p_role: 'admin'
+      });
+    });
+    if (result.error) {
+      throw new Error(result.error.message || 'Failed to update password.');
+    }
+  }
+
+  return { success: true, message: 'Password updated successfully.' };
+}
+
 export default {
   isSupabaseConfigured,
   getLeads,
@@ -707,6 +769,7 @@ export default {
   getAdminCount,
   createCrmUser,
   updateUserRole,
-  deleteCrmUser
+  deleteCrmUser,
+  changeAdminPassword
 };
 

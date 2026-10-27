@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Plus, Settings, BarChart3, LayoutGrid, Calendar, BellRing,
-  Shield, User, Wrench, ChevronDown, LogOut, Webhook, Users
+  Shield, User, Wrench, ChevronDown, LogOut, Webhook, Users, Lock
 } from 'lucide-react';
 import { getCurrentUser, signOut } from '../services/authService';
 
@@ -211,30 +211,57 @@ export const Header = ({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.5rem' }}>
                   {/* Admin Settings Shortcut */}
                   {role === 'admin' && (
-                    <button
-                      onClick={() => {
-                        setShowProfileMenu(false);
-                        onOpenSettings();
-                      }}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        padding: '0.5rem 0.7rem',
-                        background: 'transparent',
-                        border: 'none',
-                        borderRadius: 'var(--radius-sm)',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        width: '100%',
-                        color: 'var(--text-main)',
-                        fontSize: '0.8rem'
-                      }}
-                      className="nav-item-hover"
-                    >
-                      <Users size={15} color="var(--accent-solar)" />
-                      <span>Team & Settings</span>
-                    </button>
+                    <>
+                      <button
+                        onClick={() => {
+                          setShowProfileMenu(false);
+                          onOpenSettings();
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          padding: '0.5rem 0.7rem',
+                          background: 'transparent',
+                          border: 'none',
+                          borderRadius: 'var(--radius-sm)',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          width: '100%',
+                          color: 'var(--text-main)',
+                          fontSize: '0.8rem'
+                        }}
+                        className="nav-item-hover"
+                      >
+                        <Users size={15} color="var(--accent-solar)" />
+                        <span>Team & Settings</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setShowProfileMenu(false);
+                          onOpenSettings();
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          padding: '0.5rem 0.7rem',
+                          background: 'transparent',
+                          border: 'none',
+                          borderRadius: 'var(--radius-sm)',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          width: '100%',
+                          color: 'var(--text-main)',
+                          fontSize: '0.8rem'
+                        }}
+                        className="nav-item-hover"
+                      >
+                        <Lock size={15} color="var(--accent-solar)" />
+                        <span>Change Password</span>
+                      </button>
+                    </>
                   )}
 
                   {/* Sign Out Button */}

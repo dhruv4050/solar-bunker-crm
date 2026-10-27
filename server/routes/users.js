@@ -5,7 +5,8 @@ import {
   createCrmUser, 
   updateUserRole, 
   deleteCrmUser, 
-  getAdminCount 
+  getAdminCount,
+  changeAdminPassword
 } from '../db.js';
 import { authenticateUser, requireRole } from '../middleware/auth.js';
 import crypto from 'crypto';
@@ -89,6 +90,75 @@ router.get('/auth/me', authenticateUser, async (req, res) => {
     success: true,
     user: req.user
   });
+});
+
+/**
+ * POST /api/auth/change-password
+ * Self-service password change strictly for authenticated Administrators.
+ * Enforces server-side RBAC: Non-admin users (Telecallers, Technicians) are rejected with 403 Forbidden.
+ * Unauthenticated requests are rejected with 401 Unauthorized.
+ * Cryptographically verifies current password against Supabase Auth before modifying credentials.
+ * User ID/email are derived strictly from verified JWT claims (req.user), preventing IDOR attacks.
+ */
+router.post('/auth/change-password', authenticateUser, requireRole('admin'), async (req, res) => {
+  const { currentPassword, newPassword, confirmPassword } = req.body || {};
+
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing fields',
+      message: 'Current password, new password, and confirmation password are all required.'
+    });
+  }
+
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({
+      success: false,
+      error: 'Password Mismatch',
+      message: 'New password and confirmation password do not match.'
+    });
+  }
+
+  if (newPassword.length < 8) {
+    return res.status(400).json({
+      success: false,
+      error: 'Weak Password',
+      message: 'New password must be at least 8 characters in length.'
+    });
+  }
+
+  if (currentPassword === newPassword) {
+    return res.status(400).json({
+      success: false,
+      error: 'Identical Password',
+      message: 'New password must be different from current password.'
+    });
+  }
+
+  try {
+    // Identity is derived strictly from server-verified req.user
+    await changeAdminPassword({
+      email: req.user.email,
+      currentPassword,
+      newPassword,
+      userId: req.user.id
+    });
+
+    console.log(`[Security Action] Password changed successfully for admin: ${req.user.email}`);
+
+    return res.json({
+      success: true,
+      message: 'Administrator password changed successfully.'
+    });
+  } catch (err) {
+    const statusCode = err.status || 400;
+    console.error(`[Security Action] Password change rejected for ${req.user?.email}:`, err.message);
+    return res.status(statusCode).json({
+      success: false,
+      error: 'Password Change Failed',
+      message: err.message
+    });
+  }
 });
 
 /**

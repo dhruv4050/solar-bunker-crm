@@ -1,10 +1,17 @@
-import React, { useState } from 'react';
 import { 
   X, Save, Download, Check, Copy, Key, 
-  Trash2, Users, Shield, User, Wrench, Plus
+  Trash2, Users, Shield, User, Wrench, Plus,
+  Lock, Eye, EyeOff, AlertCircle, CheckCircle2
 } from 'lucide-react';
 import { getSettings, saveSettings, clearAllLeads, getStoredLeads } from '../services/leadStorage';
-import { getAllUsers, addUser, deleteUser, updateUserRole, getCurrentUser } from '../services/authService';
+import { 
+  getAllUsers, 
+  addUser, 
+  deleteUser, 
+  updateUserRole, 
+  getCurrentUser, 
+  changeAdminPassword 
+} from '../services/authService';
 
 export const SettingsModal = ({ onClose, onRefreshLeads }) => {
   const [settings, setSettings] = useState(getSettings());
@@ -20,6 +27,17 @@ export const SettingsModal = ({ onClose, onRefreshLeads }) => {
   const [newMemberPassword, setNewMemberPassword] = useState('');
   const [newMemberRole, setNewMemberRole] = useState('caller');
   const [userActionMsg, setUserActionMsg] = useState('');
+
+  // Administrator Password Change State
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState('');
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
   const currentUser = getCurrentUser();
 
@@ -127,6 +145,52 @@ export const SettingsModal = ({ onClose, onRefreshLeads }) => {
       } catch (err) {
         alert(err.message);
       }
+    }
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    setPwError('');
+    setPwSuccess('');
+
+    // Strict UI Validations
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPwError('All three password fields are required.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPwError('New password and confirmation do not match.');
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setPwError('New password must be at least 8 characters in length.');
+      return;
+    }
+
+    if (currentPassword === newPassword) {
+      setPwError('New password must be different from current password.');
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+    try {
+      await changeAdminPassword({
+        currentPassword,
+        newPassword,
+        confirmPassword
+      });
+
+      setPwSuccess('Administrator password changed successfully.');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => setPwSuccess(''), 6000);
+    } catch (err) {
+      setPwError(err.message || 'Failed to update password.');
+    } finally {
+      setIsUpdatingPassword(false);
     }
   };
 
@@ -353,6 +417,200 @@ export const SettingsModal = ({ onClose, onRefreshLeads }) => {
               </div>
             </form>
           </div>
+
+          {/* SECTION: ADMINISTRATOR SECURITY & PASSWORD CHANGE (ADMIN ONLY) */}
+          {currentUser?.role === 'admin' && (
+            <div style={{
+              background: '#ffffff',
+              padding: '1.25rem',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--border-color)',
+              boxShadow: 'var(--shadow-card)'
+            }}>
+              <div style={{ marginBottom: '1rem' }}>
+                <h3 style={{ fontSize: '1rem', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 700 }}>
+                  <Lock size={17} color="var(--accent-solar)" />
+                  Administrator Password & Security
+                </h3>
+                <p style={{ fontSize: '0.775rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
+                  Change your administrator password. Your current password is cryptographically verified with Supabase Auth before applying changes.
+                </p>
+              </div>
+
+              {pwSuccess && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  fontSize: '0.8rem',
+                  color: '#065f46',
+                  background: '#ecfdf5',
+                  border: '1px solid #a7f3d0',
+                  padding: '0.6rem 0.85rem',
+                  borderRadius: 'var(--radius-sm)',
+                  marginBottom: '1rem'
+                }}>
+                  <CheckCircle2 size={16} color="#10b981" />
+                  <span>{pwSuccess}</span>
+                </div>
+              )}
+
+              {pwError && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  fontSize: '0.8rem',
+                  color: '#991b1b',
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  padding: '0.6rem 0.85rem',
+                  borderRadius: 'var(--radius-sm)',
+                  marginBottom: '1rem'
+                }}>
+                  <AlertCircle size={16} color="#ef4444" />
+                  <span>{pwError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleChangePassword} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '0.75rem' }}>
+                  
+                  {/* Current Password */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.3rem' }}>
+                      Current Password
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <input 
+                        type={showCurrentPw ? 'text' : 'password'}
+                        placeholder="••••••••••••"
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        required
+                        style={{ width: '100%', paddingRight: '2.2rem', fontSize: '0.85rem' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCurrentPw(!showCurrentPw)}
+                        style={{
+                          position: 'absolute',
+                          right: '0.65rem',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: 0
+                        }}
+                        tabIndex={-1}
+                      >
+                        {showCurrentPw ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* New Password */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.3rem' }}>
+                      New Password (min 8 chars)
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <input 
+                        type={showNewPw ? 'text' : 'password'}
+                        placeholder="••••••••••••"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        required
+                        minLength={8}
+                        style={{ width: '100%', paddingRight: '2.2rem', fontSize: '0.85rem' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPw(!showNewPw)}
+                        style={{
+                          position: 'absolute',
+                          right: '0.65rem',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: 0
+                        }}
+                        tabIndex={-1}
+                      >
+                        {showNewPw ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Confirm New Password */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.3rem' }}>
+                      Confirm New Password
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <input 
+                        type={showConfirmPw ? 'text' : 'password'}
+                        placeholder="••••••••••••"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        required
+                        minLength={8}
+                        style={{ width: '100%', paddingRight: '2.2rem', fontSize: '0.85rem' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPw(!showConfirmPw)}
+                        style={{
+                          position: 'absolute',
+                          right: '0.65rem',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: 0
+                        }}
+                        tabIndex={-1}
+                      >
+                        {showConfirmPw ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.25rem' }}>
+                  <button 
+                    type="submit" 
+                    disabled={isUpdatingPassword}
+                    className="btn-primary" 
+                    style={{ fontSize: '0.8rem', padding: '0.45rem 1rem', opacity: isUpdatingPassword ? 0.7 : 1 }}
+                  >
+                    {isUpdatingPassword ? (
+                      <span>Verifying & Updating...</span>
+                    ) : (
+                      <>
+                        <Key size={14} />
+                        <span>Save Password</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
 
           {/* SECTION 2: WEBHOOK CREDENTIALS (GOOGLE APPS SCRIPT TOOL) */}
           <div style={{ 

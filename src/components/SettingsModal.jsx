@@ -1,3 +1,4 @@
+import React, { useState, useEffect } from 'react';
 import { 
   X, Save, Download, Check, Copy, Key, 
   Trash2, Users, Shield, User, Wrench, Plus,

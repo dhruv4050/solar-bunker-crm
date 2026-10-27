@@ -12,7 +12,7 @@ import {
 
 dotenv.config();
 
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = process.env.API_BASE || process.argv[2] || 'http://localhost:3001/api';
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://muqrumruisowcvllxaeo.supabase.co';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im11cXJ1bXJ1aXNvd2N2bGx4YWVvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0NTI0MDAsImV4cCI6MjEwNzAyODQwMH0.MgNLazO5Ht9yuJ_6SsnfFQVt7HKTY5B81ejGAF2QHZY';
 const CRM_API_KEY = process.env.CRM_API_KEY || 'sb_live_685682910eb67eb82ea6e31c6adc093209c5cbd5e07c32b2';

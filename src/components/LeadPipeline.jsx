@@ -11,6 +11,7 @@ export const LeadPipeline = ({ leads, onSelectLead, onRefreshLeads }) => {
   const [filterCallStatus, setFilterCallStatus] = useState('ALL');
   const [filterQual, setFilterQual] = useState('ALL');
   const [filterMeeting, setFilterMeeting] = useState('ALL');
+  const todayStr = new Date().toISOString().split('T')[0];
 
   const filteredLeads = (Array.isArray(leads) ? leads : []).filter(lead => {
     if (!lead) return false;
@@ -69,6 +70,8 @@ export const LeadPipeline = ({ leads, onSelectLead, onRefreshLeads }) => {
       ...lead,
       callStatus: newStatus,
       pickupStatus: newPickup,
+      initialCallCompleted: newStatus === 'Called',
+      initialCallTimestamp: newStatus === 'Called' ? new Date().toISOString() : null,
       followUpSequence: updatedSeq
     }, "Quick Toggle");
     onRefreshLeads();
@@ -270,6 +273,21 @@ export const LeadPipeline = ({ leads, onSelectLead, onRefreshLeads }) => {
                           <span className="badge badge-meeting">
                             <Calendar size={12} /> {lead.meetingDate} {lead.meetingTimeSlot}
                           </span>
+                        ) : lead.nextFollowUpDate ? (
+                          <span style={{
+                            fontSize: '0.725rem',
+                            color: lead.nextFollowUpDate < todayStr ? '#dc2626' : (lead.nextFollowUpDate === todayStr ? '#b45309' : 'var(--text-main)'),
+                            fontWeight: 600,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                            background: lead.nextFollowUpDate < todayStr ? '#fee2e2' : (lead.nextFollowUpDate === todayStr ? '#fef3c7' : '#f1f5f9'),
+                            padding: '0.2rem 0.45rem',
+                            borderRadius: '4px'
+                          }}>
+                            <Calendar size={11} />
+                            {lead.nextFollowUpDate < todayStr ? `Overdue: ${lead.nextFollowUpDate}` : (lead.nextFollowUpDate === todayStr ? `Due Today` : `Due: ${lead.nextFollowUpDate}`)}
+                          </span>
                         ) : (
                           <span style={{ fontSize: '0.775rem', color: 'var(--text-dim)' }}>None</span>
                         )}
@@ -366,11 +384,28 @@ export const LeadPipeline = ({ leads, onSelectLead, onRefreshLeads }) => {
                       🏠 {lead.propertyType} | Roof: {lead.roofType}
                     </div>
 
-                    {lead.meetingBooked && (
+                    {lead.meetingBooked ? (
                       <div className="badge badge-meeting" style={{ width: '100%', justifyContent: 'center', marginBottom: '0.5rem' }}>
                         <Calendar size={12} /> {lead.meetingDate} @ {lead.meetingTimeSlot}
                       </div>
-                    )}
+                    ) : lead.nextFollowUpDate ? (
+                      <div style={{
+                        fontSize: '0.725rem',
+                        color: lead.nextFollowUpDate < todayStr ? '#dc2626' : (lead.nextFollowUpDate === todayStr ? '#b45309' : '#1e40af'),
+                        background: lead.nextFollowUpDate < todayStr ? '#fee2e2' : (lead.nextFollowUpDate === todayStr ? '#fef3c7' : '#eff6ff'),
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '4px',
+                        fontWeight: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.3rem',
+                        marginBottom: '0.5rem'
+                      }}>
+                        <Calendar size={12} />
+                        {lead.nextFollowUpDate < todayStr ? `⚠️ Overdue (${lead.nextFollowUpDate})` : (lead.nextFollowUpDate === todayStr ? '🔔 Due Today' : `📅 Due: ${lead.nextFollowUpDate}`)}
+                      </div>
+                    ) : null}
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: 'var(--text-dim)', borderTop: '1px solid var(--border-light)', paddingTop: '0.4rem', marginTop: '0.4rem' }}>
                       <span>{lead.callStatus} ({lead.pickupStatus})</span>

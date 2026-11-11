@@ -43,6 +43,12 @@ export const normalizeLead = (lead) => {
     callStatus: lead.callStatus || 'Not Called',
     pickupStatus: lead.pickupStatus || 'Pending',
     meetingBooked: Boolean(lead.meetingBooked),
+    initialCallCompleted: Boolean(lead.initialCallCompleted || (lead.callStatus === 'Called')),
+    initialCallTimestamp: lead.initialCallTimestamp || (lead.callStatus === 'Called' ? (lead.callTimestamp || lead.updatedAt) : null),
+    nextFollowUpDate: lead.nextFollowUpDate || null,
+    nextFollowUpTime: lead.nextFollowUpTime || null,
+    nextFollowUpNotes: lead.nextFollowUpNotes || '',
+    followUpHistory: Array.isArray(lead.followUpHistory) ? lead.followUpHistory : [],
     followUpSequence: Array.isArray(lead.followUpSequence) ? lead.followUpSequence : []
   };
 };
@@ -112,12 +118,20 @@ export const updateLead = async (updatedLead, authorName = "Team Member") => {
 
   if (index !== -1) {
     const existing = leads[index];
+    const todayStr = new Date().toISOString().split('T')[0];
+    let desc = `Updated lead details for ${updatedLead.fullName || updatedLead.name}`;
+    
+    // Check if an overdue follow-up was completed
+    if (existing.nextFollowUpDate && existing.nextFollowUpDate < todayStr && (updatedLead.callStatus === 'Called' || updatedLead.nextFollowUpDate !== existing.nextFollowUpDate)) {
+      desc = `Completed overdue follow-up (Originally scheduled for ${existing.nextFollowUpDate}). ${updatedLead.nextFollowUpNotes ? `Note: ${updatedLead.nextFollowUpNotes}` : ''}`.trim();
+    }
+
     const historyEntry = {
       id: "h_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6),
       timestamp: new Date().toISOString(),
       author: authorName,
       type: "update",
-      description: `Updated lead details for ${updatedLead.fullName || updatedLead.name}`
+      description: desc
     };
 
     const newHistory = [historyEntry, ...(existing.history || [])];
@@ -168,6 +182,12 @@ export const addLead = async (newLeadData, authorName = "Manual Entry") => {
     qualification: newLeadData.qualification || "Pending",
     interestLevel: newLeadData.interestLevel || "Pending",
     callTimestamp: newLeadData.callTimestamp || null,
+    initialCallCompleted: Boolean(newLeadData.initialCallCompleted || (newLeadData.callStatus === 'Called')),
+    initialCallTimestamp: newLeadData.initialCallTimestamp || (newLeadData.callStatus === 'Called' ? new Date().toISOString() : null),
+    nextFollowUpDate: newLeadData.nextFollowUpDate || null,
+    nextFollowUpTime: newLeadData.nextFollowUpTime || null,
+    nextFollowUpNotes: newLeadData.nextFollowUpNotes || '',
+    followUpHistory: newLeadData.followUpHistory || [],
     assignedTechnicianId: newLeadData.assignedTechnicianId || null,
     assignedTechnicianName: newLeadData.assignedTechnicianName || null,
     assignedTechnicianEmail: newLeadData.assignedTechnicianEmail || null,

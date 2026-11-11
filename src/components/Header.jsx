@@ -11,7 +11,8 @@ export const Header = ({
   onOpenSettings, 
   onOpenNewLeadModal, 
   leadsCount,
-  pendingRemindersCount 
+  pendingRemindersCount,
+  hasOverdueReminders = false
 }) => {
   const [currentUser, setCurrentUser] = useState(getCurrentUser());
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -36,7 +37,7 @@ export const Header = ({
     { id: 'dashboard', label: 'Overview', icon: BarChart3, roles: ['admin'] },
     { id: 'pipeline', label: 'Leads Pipeline', icon: LayoutGrid, count: leadsCount, roles: ['admin', 'caller'] },
     { id: 'meetings', label: 'Booked Meetings', icon: Calendar, roles: ['admin', 'caller', 'technician'] },
-    { id: 'reminders', label: 'Reminders', icon: BellRing, count: pendingRemindersCount, roles: ['admin', 'caller'] },
+    { id: 'reminders', label: 'Reminders', icon: BellRing, count: pendingRemindersCount, isAlert: hasOverdueReminders, roles: ['admin', 'caller'] },
     { id: 'webhook', label: 'Webhook Hub', icon: Webhook, roles: ['admin'] }
   ];
 
@@ -120,8 +121,8 @@ export const Header = ({
                 <span>{item.label}</span>
                 {item.count !== undefined && item.count > 0 && (
                   <span style={{
-                    background: isActive ? 'var(--accent-solar-glow)' : '#e2e8f0',
-                    color: isActive ? 'var(--accent-solar)' : 'var(--text-muted)',
+                    background: item.isAlert ? '#ef4444' : (isActive ? 'var(--accent-solar-glow)' : '#e2e8f0'),
+                    color: item.isAlert ? '#ffffff' : (isActive ? 'var(--accent-solar)' : 'var(--text-muted)'),
                     fontSize: '0.7rem',
                     padding: '0.1rem 0.45rem',
                     borderRadius: '9999px',

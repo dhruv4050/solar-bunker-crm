@@ -23,10 +23,17 @@ export const Dashboard = ({ leads, onSelectLead, setActiveTab, onOpenSettings, o
   const contactRate = totalLeads ? Math.round((calledCount / totalLeads) * 100) : 0;
   const qualRate = calledCount ? Math.round((qualifiedCount / calledCount) * 100) : 0;
 
-  // Follow-up pending tasks for right side widget
-  const pendingFollowUps = leads
-    .filter(l => l.pickupStatus !== 'Picked Up' && l.qualification !== 'Unqualified' && !l.meetingBooked)
-    .slice(0, 4);
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  // Follow-up priority tasks for right side widget: Overdue first, then Due Today
+  const priorityOverdue = (Array.isArray(leads) ? leads : []).filter(l => 
+    l && l.qualification !== 'Unqualified' && !l.meetingBooked && l.nextFollowUpDate && l.nextFollowUpDate < todayStr
+  );
+  const priorityToday = (Array.isArray(leads) ? leads : []).filter(l => 
+    l && l.qualification !== 'Unqualified' && !l.meetingBooked && l.nextFollowUpDate === todayStr
+  );
+  const totalActionableReminders = priorityOverdue.length + priorityToday.length;
+  const pendingFollowUps = [...priorityOverdue, ...priorityToday].slice(0, 5);
 
   // Table filtering
   const filteredRecentLeads = (Array.isArray(leads) ? leads : []).filter(lead => {
@@ -391,7 +398,7 @@ export const Dashboard = ({ leads, onSelectLead, setActiveTab, onOpenSettings, o
                 onClick={() => setActiveTab('reminders')}
                 style={{ background: 'transparent', color: 'var(--accent-solar)', fontSize: '0.775rem', fontWeight: 600, cursor: 'pointer' }}
               >
-                See all ({pendingFollowUps.length})
+                See all ({totalActionableReminders})
               </button>
             </div>
 
@@ -403,9 +410,7 @@ export const Dashboard = ({ leads, onSelectLead, setActiveTab, onOpenSettings, o
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {pendingFollowUps.map(lead => {
-                  const seq = lead.followUpSequence || [];
-                  const doneCount = seq.filter(s => s.completed).length;
-                  const nextStage = doneCount + 1 <= 5 ? doneCount + 1 : 5;
+                  const isOverdue = lead.nextFollowUpDate && lead.nextFollowUpDate < todayStr;
 
                   return (
                     <div
@@ -414,8 +419,9 @@ export const Dashboard = ({ leads, onSelectLead, setActiveTab, onOpenSettings, o
                       style={{
                         padding: '0.85rem',
                         borderRadius: 'var(--radius-sm)',
-                        background: '#f8fafc',
-                        border: '1px solid var(--border-light)',
+                        background: isOverdue ? '#fff5f5' : '#f8fafc',
+                        border: isOverdue ? '1px solid #fecaca' : '1px solid var(--border-light)',
+                        borderLeft: isOverdue ? '4px solid #ef4444' : '4px solid var(--accent-solar)',
                         cursor: 'pointer',
                         transition: 'all 0.15s ease',
                         display: 'flex',
@@ -424,11 +430,9 @@ export const Dashboard = ({ leads, onSelectLead, setActiveTab, onOpenSettings, o
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.background = '#ffffff';
-                        e.currentTarget.style.borderColor = 'var(--accent-solar)';
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.background = '#f8fafc';
-                        e.currentTarget.style.borderColor = 'var(--border-light)';
+                        e.currentTarget.style.background = isOverdue ? '#fff5f5' : '#f8fafc';
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
@@ -436,11 +440,11 @@ export const Dashboard = ({ leads, onSelectLead, setActiveTab, onOpenSettings, o
                           width: '28px',
                           height: '28px',
                           borderRadius: '50%',
-                          background: 'rgba(245, 158, 11, 0.15)',
+                          background: isOverdue ? '#fee2e2' : 'rgba(245, 158, 11, 0.15)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          color: 'var(--accent-solar)'
+                          color: isOverdue ? '#dc2626' : 'var(--accent-solar)'
                         }}>
                           <Clock size={15} />
                         </div>
@@ -448,8 +452,8 @@ export const Dashboard = ({ leads, onSelectLead, setActiveTab, onOpenSettings, o
                           <strong style={{ fontSize: '0.85rem', color: 'var(--text-main)', display: 'block' }}>
                             {lead.fullName}
                           </strong>
-                          <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>
-                            Cadence #{nextStage} • {lead.city}
+                          <span style={{ fontSize: '0.725rem', color: isOverdue ? '#dc2626' : 'var(--text-muted)', fontWeight: isOverdue ? 600 : 400 }}>
+                            {isOverdue ? `⚠️ Overdue (${lead.nextFollowUpDate})` : `Due Today (${lead.nextFollowUpTime || 'Morning'})`} • {lead.city}
                           </span>
                         </div>
                       </div>

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { 
   X, PhoneCall, Calendar, CheckSquare, Square,
-  FileText, Plus, Tag, CheckCircle2, AlertTriangle
+  FileText, Plus, Tag, CheckCircle2, AlertTriangle,
+  Clock, AlertCircle
 } from 'lucide-react';
 import { updateLead } from '../services/leadStorage';
 import { getCurrentUser, getTechnicians } from '../services/authService';
@@ -31,7 +32,20 @@ export const LeadDetailModal = ({ lead, onClose, onRefresh, initialTab = 'source
     }
   }, [userRole]);
 
-  // 5-Stage Automated Follow-Up Boxes State
+  // Initial Call State (Box 1)
+  const [initialCallCompleted, setInitialCallCompleted] = useState(
+    Boolean(lead?.initialCallCompleted || (lead?.callStatus === 'Called') || (lead?.followUpSequence?.[0]?.completed))
+  );
+  const [initialCallTimestamp, setInitialCallTimestamp] = useState(
+    lead?.initialCallTimestamp || (lead?.callStatus === 'Called' ? (lead?.callTimestamp || lead?.updatedAt) : null) || (lead?.followUpSequence?.[0]?.timestamp || null)
+  );
+
+  // Next Follow-Up State
+  const [nextFollowUpDate, setNextFollowUpDate] = useState(lead?.nextFollowUpDate || '');
+  const [nextFollowUpTime, setNextFollowUpTime] = useState(lead?.nextFollowUpTime || 'Morning (10:00 AM - 12:00 PM)');
+  const [nextFollowUpNotes, setNextFollowUpNotes] = useState(lead?.nextFollowUpNotes || '');
+
+  // Backward-compatible 5-Stage state
   const initialFollowUps = [1, 2, 3, 4, 5].map(stage => {
     const existing = (lead?.followUpSequence || []).find(s => s.stage === stage);
     return existing || {
@@ -56,30 +70,35 @@ export const LeadDetailModal = ({ lead, onClose, onRefresh, initialTab = 'source
 
   if (!lead) return null;
 
-  const handleToggleFollowUp = (stage) => {
-    const next = followUps.map(item => {
-      if (item.stage === stage) {
-        const isNowCompleted = !item.completed;
-        const nowIso = new Date().toISOString();
-        return {
-          ...item,
-          completed: isNowCompleted,
-          timestamp: isNowCompleted ? nowIso : null
-        };
-      }
-      return item;
-    });
-    setFollowUps(next);
+  const todayDateStr = new Date().toISOString().split('T')[0];
+  const isLeadOverdue = Boolean(
+    lead?.nextFollowUpDate && 
+    lead.nextFollowUpDate < todayDateStr && 
+    lead?.qualification !== 'Unqualified' && 
+    !lead?.meetingBooked
+  );
 
-    const hasCompleted = next.some(i => i.completed);
-    if (hasCompleted && callStatus !== 'Called') {
-      setCallStatus('Called');
+  const handleToggleInitialCall = () => {
+    if (!initialCallCompleted) {
+      const nowIso = new Date().toISOString();
+      setInitialCallCompleted(true);
+      setInitialCallTimestamp(nowIso);
+      if (callStatus !== 'Called') {
+        setCallStatus('Called');
+      }
+      setFollowUps(prev => prev.map((s, idx) => idx === 0 ? { ...s, completed: true, timestamp: nowIso } : s));
+    } else {
+      setInitialCallCompleted(false);
+      setInitialCallTimestamp(null);
+      setCallStatus('Not Called');
+      setFollowUps(prev => prev.map((s, idx) => idx === 0 ? { ...s, completed: false, timestamp: null } : s));
     }
   };
 
   const formatFollowUpTime = (isoString) => {
     if (!isoString) return '';
     const d = new Date(isoString);
+    if (isNaN(d.getTime())) return isoString;
     return d.toLocaleString('en-IN', {
       day: 'numeric',
       month: 'short',
@@ -93,6 +112,33 @@ export const LeadDetailModal = ({ lead, onClose, onRefresh, initialTab = 'source
   const handleSaveLead = () => {
     setIsSaving(true);
 
+    const todayStr = new Date().toISOString().split('T')[0];
+    const wasOverdue = lead.nextFollowUpDate && lead.nextFollowUpDate < todayStr;
+    
+    // Maintain followUpHistory log
+    let updatedHistory = Array.isArray(lead.followUpHistory) ? [...lead.followUpHistory] : [];
+    
+    if (wasOverdue && (callStatus === 'Called' || nextFollowUpDate !== lead.nextFollowUpDate)) {
+      updatedHistory.unshift({
+        id: 'fu_ov_' + Date.now(),
+        type: 'overdue_resolved',
+        timestamp: new Date().toISOString(),
+        author: currentUser?.name || 'Telecaller',
+        outcome: pickupStatus,
+        originalScheduledDate: lead.nextFollowUpDate,
+        notes: `Overdue follow-up resolved. Originally scheduled for ${lead.nextFollowUpDate}. ${nextFollowUpNotes ? `Next: ${nextFollowUpNotes}` : ''}`
+      });
+    } else if (callStatus === 'Called' && !lead.initialCallCompleted && initialCallCompleted) {
+      updatedHistory.unshift({
+        id: 'fu_init_' + Date.now(),
+        type: 'initial_call',
+        timestamp: initialCallTimestamp || new Date().toISOString(),
+        author: currentUser?.name || 'Telecaller',
+        outcome: pickupStatus,
+        notes: `Initial call completed with status: ${pickupStatus}`
+      });
+    }
+
     const selectedTech = technicians.find(t => t.id === assignedTechnicianId);
     const updatedObj = {
       ...lead,
@@ -100,6 +146,12 @@ export const LeadDetailModal = ({ lead, onClose, onRefresh, initialTab = 'source
       pickupStatus,
       qualification,
       interestLevel,
+      initialCallCompleted,
+      initialCallTimestamp,
+      nextFollowUpDate: nextFollowUpDate || null,
+      nextFollowUpTime: nextFollowUpTime || null,
+      nextFollowUpNotes: nextFollowUpNotes || '',
+      followUpHistory: updatedHistory,
       followUpSequence: followUps,
       meetingBooked,
       meetingDate: meetingBooked ? meetingDate : null,
@@ -306,11 +358,11 @@ export const LeadDetailModal = ({ lead, onClose, onRefresh, initialTab = 'source
             </div>
           )}
 
-          {/* TAB 2: CALL LOG RESULTS & 5-STAGE FOLLOW-UP CADENCE */}
+          {/* TAB 2: CALL LOG RESULTS & NEXT FOLLOW-UP SCHEDULER */}
           {activeTab === 'call' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
-              {/* Status Banner when Customer Answered */}
+              {/* Status Banner */}
               {isCustomerAnswered ? (
                 <div style={{
                   background: '#ecfdf5',
@@ -326,102 +378,327 @@ export const LeadDetailModal = ({ lead, onClose, onRefresh, initialTab = 'source
                   <div>
                     <strong style={{ fontSize: '0.95rem', display: 'block' }}>Customer Answered & Connected!</strong>
                     <span style={{ fontSize: '0.8rem', color: '#047857' }}>
-                      Follow-up cadence completed successfully. This lead will not appear in the pending reminders queue.
+                      Call completed successfully. You can book a consultation directly in Tab 3 or schedule a next follow-up below.
+                    </span>
+                  </div>
+                </div>
+              ) : isLeadOverdue ? (
+                <div style={{
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  padding: '0.85rem 1.25rem',
+                  borderRadius: 'var(--radius-sm)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  color: '#dc2626'
+                }}>
+                  <AlertTriangle size={22} color="#dc2626" />
+                  <div>
+                    <strong style={{ fontSize: '0.95rem', display: 'block' }}>⚠️ Overdue Follow-Up Alert!</strong>
+                    <span style={{ fontSize: '0.8rem', color: '#b91c1c' }}>
+                      This lead was scheduled for follow-up on <strong>{lead.nextFollowUpDate}</strong> and was missed. Please dial now, record your notes, and update the follow-up date.
+                    </span>
+                  </div>
+                </div>
+              ) : nextFollowUpDate ? (
+                <div style={{
+                  background: '#eff6ff',
+                  border: '1px solid #bfdbfe',
+                  padding: '0.85rem 1.25rem',
+                  borderRadius: 'var(--radius-sm)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  color: '#1d4ed8'
+                }}>
+                  <Calendar size={20} color="#2563eb" />
+                  <div>
+                    <strong style={{ fontSize: '0.925rem', display: 'block' }}>Scheduled Next Follow-Up</strong>
+                    <span style={{ fontSize: '0.8rem', color: '#1e40af' }}>
+                      Target Date: <strong>{nextFollowUpDate}</strong> {nextFollowUpTime ? `(${nextFollowUpTime})` : ''} {nextFollowUpNotes ? `— "${nextFollowUpNotes}"` : ''}
                     </span>
                   </div>
                 </div>
               ) : (
                 <div style={{
-                  background: '#fffbeb',
-                  border: '1px solid #fde68a',
+                  background: '#f8fafc',
+                  border: '1px solid var(--border-color)',
                   padding: '0.85rem 1.25rem',
                   borderRadius: 'var(--radius-sm)',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'space-between',
                   gap: '0.75rem'
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#b45309' }}>
-                    <AlertTriangle size={18} />
-                    <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
-                      Follow-Up Cadence: {completedFollowUpsCount} of 5 calls placed
+                  <PhoneCall size={20} color="var(--accent-solar)" />
+                  <div>
+                    <strong style={{ fontSize: '0.9rem', color: 'var(--text-main)', display: 'block' }}>Call Execution & Follow-Up Tracker</strong>
+                    <span style={{ fontSize: '0.775rem', color: 'var(--text-muted)' }}>
+                      Log the initial call date/time, set candidate qualification, and schedule the next follow-up date.
                     </span>
                   </div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    Tap any box when a call attempt is placed to record date & time automatically.
-                  </span>
                 </div>
               )}
 
-              {/* 5 FOLLOW-UP BOXES */}
-              <div style={{
-                background: '#ffffff',
-                padding: '1.25rem',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border-color)',
-                boxShadow: 'var(--shadow-card)'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                  <h3 style={{ fontSize: '1rem', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 700 }}>
-                    <PhoneCall size={17} color="var(--accent-solar)" /> 5-Stage Follow-Up Tracking Boxes
-                  </h3>
-                  <span style={{ fontSize: '0.775rem', color: 'var(--text-muted)' }}>
-                    {5 - completedFollowUpsCount} calls remaining if unreached
-                  </span>
+              {/* BOX 1 & NEXT FOLLOW-UP SCHEDULER CONTAINER */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
+                
+                {/* BOX 1: INITIAL CALL (CALL PLACED) */}
+                <div style={{
+                  background: '#ffffff',
+                  padding: '1.25rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: initialCallCompleted ? '1.5px solid #10b981' : '1px solid var(--border-color)',
+                  boxShadow: 'var(--shadow-card)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '1rem'
+                }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                      <div>
+                        <h4 style={{ fontSize: '1rem', color: 'var(--text-main)', margin: 0, fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <PhoneCall size={17} color={initialCallCompleted ? '#10b981' : 'var(--accent-solar)'} />
+                          Box 1: Initial Call Placed
+                        </h4>
+                        <p style={{ fontSize: '0.775rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
+                          Record when the first call attempt was placed to this prospect.
+                        </p>
+                      </div>
+
+                      <span style={{
+                        padding: '0.25rem 0.6rem',
+                        borderRadius: 'var(--radius-pill)',
+                        fontSize: '0.725rem',
+                        fontWeight: 700,
+                        background: initialCallCompleted ? '#ecfdf5' : '#fef3c7',
+                        color: initialCallCompleted ? '#059669' : '#b45309'
+                      }}>
+                        {initialCallCompleted ? '✓ Completed' : 'Pending Initial Call'}
+                      </span>
+                    </div>
+
+                    <div 
+                      onClick={handleToggleInitialCall}
+                      style={{
+                        marginTop: '0.75rem',
+                        padding: '0.9rem',
+                        borderRadius: 'var(--radius-sm)',
+                        background: initialCallCompleted ? '#ecfdf5' : '#f8fafc',
+                        border: initialCallCompleted ? '1px solid #a7f3d0' : '1px dashed var(--border-color)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        {initialCallCompleted ? (
+                          <CheckSquare size={22} color="#059669" />
+                        ) : (
+                          <Square size={22} color="var(--text-dim)" />
+                        )}
+                        <div>
+                          <strong style={{ fontSize: '0.875rem', color: initialCallCompleted ? '#059669' : 'var(--text-main)', display: 'block' }}>
+                            {initialCallCompleted ? 'Initial Call Recorded' : 'Click to Log Initial Call Placed'}
+                          </strong>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            {initialCallCompleted && initialCallTimestamp 
+                              ? `Logged on: ${formatFollowUpTime(initialCallTimestamp)}`
+                              : 'Automatically marks call date, time & updates status'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {initialCallCompleted && (
+                        <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)', textDecoration: 'underline' }}>
+                          Undo
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', background: '#f8fafc', padding: '0.6rem', borderRadius: '6px' }}>
+                    💡 <strong>Tip:</strong> If customer did not answer or asked for a callback, set the exact date in the Next Follow-Up section.
+                  </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.65rem' }}>
-                  {followUps.map((item) => {
-                    const isCompleted = item.completed;
-                    return (
-                      <div
-                        key={item.stage}
-                        onClick={() => handleToggleFollowUp(item.stage)}
+                {/* DYNAMIC NEXT FOLLOW-UP SCHEDULER */}
+                <div style={{
+                  background: '#ffffff',
+                  padding: '1.25rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: isLeadOverdue ? '1.5px solid #ef4444' : (nextFollowUpDate ? '1.5px solid var(--accent-solar)' : '1px solid var(--border-color)'),
+                  boxShadow: 'var(--shadow-card)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.85rem'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <h4 style={{ fontSize: '1rem', color: 'var(--text-main)', margin: 0, fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Calendar size={17} color={isLeadOverdue ? '#ef4444' : 'var(--accent-solar)'} />
+                        Next Follow-Up Scheduler
+                      </h4>
+                      <p style={{ fontSize: '0.775rem', color: 'var(--text-muted)', margin: '0.2rem 0 0 0' }}>
+                        Select the exact date to call next (e.g. 2 months later, next week).
+                      </p>
+                    </div>
+
+                    {nextFollowUpDate && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNextFollowUpDate('');
+                          setNextFollowUpNotes('');
+                        }}
                         style={{
-                          background: isCompleted ? '#ecfdf5' : '#f8fafc',
-                          border: isCompleted ? '1.5px solid #10b981' : '1px solid var(--border-color)',
-                          borderRadius: 'var(--radius-sm)',
-                          padding: '0.85rem',
+                          background: 'transparent',
+                          color: '#ef4444',
+                          border: 'none',
+                          fontSize: '0.725rem',
                           cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '0.4rem',
-                          userSelect: 'none'
+                          fontWeight: 600
+                        }}
+                        title="Clear scheduled follow-up"
+                      >
+                        Clear Date
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Direct Date & Time Inputs */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.775rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+                        Next Follow-Up Date *
+                      </label>
+                      <input 
+                        type="date"
+                        value={nextFollowUpDate}
+                        onChange={(e) => setNextFollowUpDate(e.target.value)}
+                        style={{ 
+                          width: '100%', 
+                          fontSize: '0.85rem',
+                          padding: '0.5rem',
+                          border: isLeadOverdue ? '1.5px solid #ef4444' : '1px solid var(--border-color)',
+                          background: '#f8fafc',
+                          borderRadius: 'var(--radius-sm)'
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.775rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+                        Preferred Time Slot
+                      </label>
+                      <select
+                        value={nextFollowUpTime}
+                        onChange={(e) => setNextFollowUpTime(e.target.value)}
+                        style={{ 
+                          width: '100%', 
+                          fontSize: '0.825rem', 
+                          padding: '0.5rem', 
+                          background: '#f8fafc',
+                          borderRadius: 'var(--radius-sm)'
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <span style={{
-                            fontWeight: 700,
-                            fontSize: '0.85rem',
-                            color: isCompleted ? '#059669' : 'var(--text-main)'
-                          }}>
-                            {item.label}
-                          </span>
-                          {isCompleted ? (
-                            <CheckSquare size={18} color="#059669" />
-                          ) : (
-                            <Square size={18} color="var(--text-dim)" />
-                          )}
-                        </div>
+                        <option value="Morning (10:00 AM - 12:00 PM)">Morning (10 AM - 12 PM)</option>
+                        <option value="Afternoon (02:00 PM - 04:00 PM)">Afternoon (2 PM - 4 PM)</option>
+                        <option value="Evening (05:00 PM - 07:00 PM)">Evening (5 PM - 7 PM)</option>
+                        <option value="Anytime">Anytime</option>
+                      </select>
+                    </div>
+                  </div>
 
-                        {isCompleted ? (
-                          <div style={{ fontSize: '0.725rem', color: '#059669', fontWeight: 600 }}>
-                            ✓ Called at:
-                            <div style={{ color: 'var(--text-main)', fontWeight: 500, marginTop: '2px' }}>
-                              {formatFollowUpTime(item.timestamp)}
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={{ fontSize: '0.725rem', color: 'var(--text-dim)' }}>
-                            Pending (Click to log)
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                  {/* Follow-Up Notes & Instructions */}
+                  <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '0.45rem' }}>
+                      Follow-Up Notes & Instructions
+                    </label>
+
+                    <textarea 
+                      rows={4}
+                      placeholder="Write your follow-up notes here (e.g. Customer asked to call back after 2 months on this date; interested in 5kW rooftop system; wants loan/subsidy details)..."
+                      value={nextFollowUpNotes}
+                      onChange={(e) => setNextFollowUpNotes(e.target.value)}
+                      style={{ 
+                        width: '100%', 
+                        fontSize: '0.85rem', 
+                        lineHeight: '1.5',
+                        padding: '0.75rem', 
+                        background: '#f8fafc',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 'var(--radius-sm)',
+                        resize: 'vertical',
+                        minHeight: '95px',
+                        fontFamily: 'inherit'
+                      }}
+                    />
+                    <span style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+                      These notes will be displayed clearly in your daily Reminders queue when this follow-up is due.
+                    </span>
+                  </div>
+
                 </div>
+
               </div>
+
+              {/* COMPLETED CALLS & OVERDUE AUDIT LOG */}
+              {((lead.followUpHistory && lead.followUpHistory.length > 0) || (lead.followUpSequence && lead.followUpSequence.some(s => s.completed))) && (
+                <div style={{
+                  background: '#ffffff',
+                  padding: '1rem 1.25rem',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-light)'
+                }}>
+                  <h4 style={{ fontSize: '0.85rem', color: 'var(--text-main)', margin: '0 0 0.6rem 0', fontWeight: 700 }}>
+                    Follow-Up & Call History Record
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                    {lead.followUpHistory && lead.followUpHistory.map((item, idx) => (
+                      <div key={item.id || idx} style={{
+                        fontSize: '0.775rem',
+                        background: '#f8fafc',
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: '6px',
+                        borderLeft: item.type === 'overdue_resolved' ? '3px solid #ef4444' : '3px solid #10b981',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <div>
+                          <strong>{item.type === 'overdue_resolved' ? '⚠️ Missed Call Resolved' : '✓ Call Logged'}</strong>: {item.notes || item.outcome}
+                        </div>
+                        <span style={{ color: 'var(--text-dim)', fontSize: '0.725rem' }}>
+                          {formatFollowUpTime(item.timestamp)}
+                        </span>
+                      </div>
+                    ))}
+                    {lead.followUpSequence && lead.followUpSequence.filter(s => s.completed).map(s => (
+                      <div key={`seq_${s.stage}`} style={{
+                        fontSize: '0.775rem',
+                        background: '#f8fafc',
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: '6px',
+                        borderLeft: '3px solid #10b981',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <div>
+                          <strong>✓ {s.label || `Stage ${s.stage}`} Completed</strong>
+                        </div>
+                        <span style={{ color: 'var(--text-dim)', fontSize: '0.725rem' }}>
+                          {formatFollowUpTime(s.timestamp)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* CALL OUTCOMES & QUALIFICATION */}
               <div style={{

@@ -108,15 +108,20 @@ export function App() {
     );
   }
 
-  // Count pending follow-up leads for the header badge
-  const pendingRemindersCount = (Array.isArray(leads) ? leads : []).filter(l => {
-    if (!l) return false;
-    if (l.pickupStatus === 'Picked Up') return false;
-    if (l.qualification === 'Unqualified') return false;
-    if (l.meetingBooked) return false;
-    const seq = Array.isArray(l.followUpSequence) ? l.followUpSequence : [];
-    return seq.filter(s => s?.completed).length < 5;
+  // Count actionable follow-up leads (Due Today + Overdue) for the header badge
+  const todayStr = new Date().toISOString().split('T')[0];
+  const dueTodayCount = (Array.isArray(leads) ? leads : []).filter(l => {
+    if (!l || l.qualification === 'Unqualified' || l.meetingBooked) return false;
+    return l.nextFollowUpDate === todayStr;
   }).length;
+
+  const overdueCount = (Array.isArray(leads) ? leads : []).filter(l => {
+    if (!l || l.qualification === 'Unqualified' || l.meetingBooked) return false;
+    return l.nextFollowUpDate && l.nextFollowUpDate < todayStr;
+  }).length;
+
+  const pendingRemindersCount = dueTodayCount + overdueCount;
+  const hasOverdueReminders = overdueCount > 0;
 
   const handleOpenLeadModal = (lead, defaultTab = 'source') => {
     setSelectedLead(lead);
@@ -137,6 +142,7 @@ export function App() {
         onOpenNewLeadModal={() => setIsAddLeadOpen(true)}
         leadsCount={leads.length}
         pendingRemindersCount={pendingRemindersCount}
+        hasOverdueReminders={hasOverdueReminders}
       />
 
       {/* Backend Status Notice */}

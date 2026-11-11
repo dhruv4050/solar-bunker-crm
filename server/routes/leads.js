@@ -249,13 +249,19 @@ router.patch('/:id', async (req, res) => {
     if (updates.siteVisitNotes !== undefined) dbUpdates.site_visit_notes = updates.siteVisitNotes;
     if (updates.siteVisitedAt !== undefined) dbUpdates.site_visited_at = updates.siteVisitedAt;
 
-    // Persist extra metadata (follow-up sequence, site visit info) in raw_data JSON
+    // Persist extra metadata (follow-up info, site visit info) in raw_data JSON
     const existingRaw = typeof existing.raw_data === 'string' 
       ? JSON.parse(existing.raw_data || '{}') 
       : (existing.raw_data || existing.extraFields || {});
     const updatedRaw = {
       ...existingRaw,
       ...(updates.followUpSequence !== undefined ? { followUpSequence: updates.followUpSequence } : {}),
+      ...(updates.nextFollowUpDate !== undefined ? { nextFollowUpDate: updates.nextFollowUpDate } : {}),
+      ...(updates.nextFollowUpTime !== undefined ? { nextFollowUpTime: updates.nextFollowUpTime } : {}),
+      ...(updates.nextFollowUpNotes !== undefined ? { nextFollowUpNotes: updates.nextFollowUpNotes } : {}),
+      ...(updates.initialCallCompleted !== undefined ? { initialCallCompleted: updates.initialCallCompleted } : {}),
+      ...(updates.initialCallTimestamp !== undefined ? { initialCallTimestamp: updates.initialCallTimestamp } : {}),
+      ...(updates.followUpHistory !== undefined ? { followUpHistory: updates.followUpHistory } : {}),
       ...(updates.siteVisitStatus !== undefined ? { siteVisitStatus: updates.siteVisitStatus } : {}),
       ...(updates.siteVisitNotes !== undefined ? { siteVisitNotes: updates.siteVisitNotes } : {}),
       ...(updates.siteVisitedAt !== undefined ? { siteVisitedAt: updates.siteVisitedAt } : {}),
@@ -269,7 +275,15 @@ router.patch('/:id', async (req, res) => {
 
     // Record activity audit trail
     const author = req.user.name || updates.authorName || 'Staff Member';
-    const activityDesc = updates.activityDescription || updates.notes || `Updated details for ${existing.fullName || existing.name}`;
+    
+    // Check if an overdue follow-up was completed
+    let activityDesc = updates.activityDescription || updates.notes || `Updated details for ${existing.fullName || existing.name}`;
+    const prevFollowUpDate = existing.nextFollowUpDate || existingRaw.nextFollowUpDate;
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (prevFollowUpDate && prevFollowUpDate < todayStr && (updates.callStatus === 'Called' || updates.nextFollowUpDate !== prevFollowUpDate)) {
+      activityDesc = `Completed overdue follow-up (Originally scheduled for ${prevFollowUpDate}). ${updates.nextFollowUpNotes ? `Note: ${updates.nextFollowUpNotes}` : ''}`.trim();
+    }
+
     const activityOutcome = updates.outcome || (updates.meetingBooked ? 'Meeting Booked' : updates.callStatus === 'Called' ? 'Call Completed' : 'Details Updated');
     const actType = updates.activityType || (updates.meetingBooked ? 'meeting_scheduled' : updates.callStatus === 'Called' ? 'call' : 'update');
 
@@ -280,7 +294,7 @@ router.patch('/:id', async (req, res) => {
       notes: activityDesc,
       performed_by: author,
       performed_at: new Date().toISOString(),
-      next_follow_up_at: updates.next_follow_up_at || null
+      next_follow_up_at: updates.nextFollowUpDate || updates.next_follow_up_at || null
     });
 
     res.json({ success: true, lead: updated });
